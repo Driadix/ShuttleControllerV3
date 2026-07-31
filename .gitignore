@@ -1,0 +1,16 @@
+# PlatformIO
+.pio/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.*
+!.env.example
