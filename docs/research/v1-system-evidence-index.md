@@ -4,7 +4,7 @@
 
 Цель этого индекса — зафиксировать на системном уровне то, что **фактически присутствует** во внешнем поведении и production-коде V1, до последующей классификации. Это не спецификация V3, не проект нового интерфейса и не перечень задач реализации.
 
-Исследован текущий `main` репозитория `C:\Projects\Shuttle\ShuttleController`, commit `4a226e5`. Текущий `README.md` использован только для установления production-входа: production-сборка выполняется Arduino IDE, входом служит `Cntrl_V2/Cntrl_V2.ino`, а PlatformIO прямо назван лишь дополнительной compile-проверкой (`ShuttleController/README.md:5-9`). Поведение ниже выводится только из production-кода этого входа и подключаемых им production-файлов (`ShuttleController/Cntrl_V2/Cntrl_V2.ino:1-14`).
+Исследован текущий `main` канонического репозитория https://github.com/Driadix/ShuttleController (локальная копия на момент исследования: `C:\Projects\Shuttle\ShuttleController`; на других машинах путь может отличаться, например `D:\Projects\ShuttleController`), commit `4a226e5`. Текущий `README.md` использован только для установления production-входа: production-сборка выполняется Arduino IDE, входом служит `Cntrl_V2/Cntrl_V2.ino`, а PlatformIO прямо назван лишь дополнительной compile-проверкой (`ShuttleController/README.md:5-9`). Поведение ниже выводится только из production-кода этого входа и подключаемых им production-файлов (`ShuttleController/Cntrl_V2/Cntrl_V2.ino:1-14`).
 
 Не использованы как источники: `docs/Controller-Nonblocking-Refactoring-Plan.md`, refactor-ветки, `.slim`, generated `.pio` manifests, тесты и артефакты предыдущего рефакторинга. `platformio.ini` не использован как профиль production-системы.
 
