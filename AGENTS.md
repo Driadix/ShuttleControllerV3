@@ -14,6 +14,5 @@ Domain documentation uses a single-context layout. See `docs/agents/domain.md`.
 
 ### Model routing
 
-- Default model for all work: Deepseek V4 Flash Free Max (opencode).
-- Backoff: GPT 5.6 Luna xhigh.
-- Use the default (Deepseek) unless it is not working, or you judge the task would benefit from GPT Luna - then switch to GPT Luna.
+- Simple subagent tasks - explore, simple research, docs analysis, another point of view: Deepseek V4 Flash (default) or GPT 5.6 Luna xhigh (backoff).
+- Main work - architectural decisions, code review, deep analysis, orchestration, vital decisions: GPT 5.6 Sol high.
