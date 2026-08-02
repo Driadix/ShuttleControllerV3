@@ -4,7 +4,7 @@
 
 Issues and PRDs are tracked in GitHub Issues for `Driadix/ShuttleControllerV3`. See `docs/agents/issue-tracker.md`.
 
-GitHub titles, bodies, and comments contain Cyrillic text. Follow the mandatory UTF-8 workflow in `docs/agents/issue-tracker.md`; never round-trip `gh` output through an unconfigured Windows PowerShell 5.1 pipeline.
+GitHub titles, bodies, and comments contain Cyrillic text. OpenCode's Bash tool (Git Bash) passes UTF-8 through natively. Write multi-line bodies and comments via UTF-8 Markdown files with `gh --body-file`; see `docs/agents/issue-tracker.md`.
 
 ### HITL decisions
 

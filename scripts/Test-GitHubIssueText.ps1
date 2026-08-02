@@ -4,7 +4,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Windows PowerShell 5.1 otherwise decodes native UTF-8 output through a legacy code page.
+# Diagnostic only: run when mojibake is suspected, not after every mutation.
+# The UTF-8 setup below keeps the check reliable even under Windows PowerShell 5.1.
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::InputEncoding = $utf8
 [Console]::OutputEncoding = $utf8

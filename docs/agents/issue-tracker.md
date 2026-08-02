@@ -13,41 +13,24 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v`; `gh` does this automatically inside the clone.
 
-## UTF-8 safety on Windows
+## UTF-8 safety
 
 Issue titles, bodies, and comments contain Cyrillic text.
-Windows PowerShell 5.1 may decode UTF-8 output from native commands with a legacy console code page.
-Piping `gh` JSON into `ConvertFrom-Json` and writing the result back can therefore permanently store mojibake on GitHub even when the source text was valid.
-
-The following rules are mandatory for GitHub writes containing non-ASCII text:
+OpenCode's Bash tool runs Git Bash, which passes UTF-8 through natively, so `gh --json ... --jq ...` pipelines are safe.
+The remaining rule for writes:
 
 - Compose every multi-line body or comment in a UTF-8 Markdown file and pass it to `gh` with `--body-file`.
-- Use the file directly as the write source; do not read a GitHub body through a native PowerShell pipeline, modify it in memory, and write it back.
-- Prefer `gh --json ... --jq ...` when a query can be completed inside `gh` without a PowerShell JSON round trip.
-- If PowerShell must parse `gh` JSON, set UTF-8 before the first native command as shown below.
-- Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-GitHubIssueText.ps1` after every mutation of an issue, comment, or map.
-- Fetch the mutated issue again and verify its full body, not only the `gh` exit code or URL.
+- Use the file directly as the write source; do not read a GitHub body through a shell pipeline, modify it in memory, and write it back.
+- After a write, fetch the mutated issue again and verify its full body, not only the `gh` exit code or URL.
 
 Safe write example:
 
-```powershell
-gh issue edit 1 --body-file "C:\Users\Driad\AppData\Local\Temp\opencode\issue-1.md"
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-GitHubIssueText.ps1
+```bash
+gh issue edit 1 --body-file "/c/Users/Driad/AppData/Local/Temp/opencode/issue-1.md"
 gh issue view 1 --json body --jq .body
 ```
 
-Required PowerShell 5.1 setup when a native JSON pipeline is unavoidable:
-
-```powershell
-$utf8 = New-Object System.Text.UTF8Encoding($false)
-[Console]::InputEncoding = $utf8
-[Console]::OutputEncoding = $utf8
-$OutputEncoding = $utf8
-
-$issue = gh issue view 1 --json body | ConvertFrom-Json
-```
-
-Never run the final line without the preceding encoding setup.
+If mojibake is ever suspected, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-GitHubIssueText.ps1` as a diagnostic.
 For a read-modify-write operation, prefer reconstructing the intended Markdown in a reviewed UTF-8 file instead of transforming fetched text.
 
 ## Pull requests as a triage surface
