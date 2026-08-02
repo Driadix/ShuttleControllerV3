@@ -13,26 +13,6 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v`; `gh` does this automatically inside the clone.
 
-## UTF-8 safety
-
-Issue titles, bodies, and comments contain Cyrillic text.
-OpenCode's Bash tool runs Git Bash, which passes UTF-8 through natively, so `gh --json ... --jq ...` pipelines are safe.
-The remaining rule for writes:
-
-- Compose every multi-line body or comment in a UTF-8 Markdown file and pass it to `gh` with `--body-file`.
-- Use the file directly as the write source; do not read a GitHub body through a shell pipeline, modify it in memory, and write it back.
-- After a write, fetch the mutated issue again and verify its full body, not only the `gh` exit code or URL.
-
-Safe write example:
-
-```bash
-gh issue edit 1 --body-file "/c/Users/Driad/AppData/Local/Temp/opencode/issue-1.md"
-gh issue view 1 --json body --jq .body
-```
-
-If mojibake is ever suspected, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-GitHubIssueText.ps1` as a diagnostic.
-For a read-modify-write operation, prefer reconstructing the intended Markdown in a reviewed UTF-8 file instead of transforming fetched text.
-
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.**

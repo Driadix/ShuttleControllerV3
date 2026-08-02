@@ -4,8 +4,6 @@
 
 Issues and PRDs are tracked in GitHub Issues for `Driadix/ShuttleControllerV3`. See `docs/agents/issue-tracker.md`.
 
-GitHub titles, bodies, and comments contain Cyrillic text. OpenCode's Bash tool (Git Bash) passes UTF-8 through natively. Write multi-line bodies and comments via UTF-8 Markdown files with `gh --body-file`; see `docs/agents/issue-tracker.md`.
-
 ### HITL decisions
 
 Before asking the owner to choose among meaningful product, system, or architecture alternatives, provide an evidence-based decision briefing and your recommendation. Follow `docs/agents/hitl-decisions.md`.
