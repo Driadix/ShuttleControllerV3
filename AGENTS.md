@@ -6,6 +6,10 @@ Issues and PRDs are tracked in GitHub Issues for `Driadix/ShuttleControllerV3`. 
 
 GitHub titles, bodies, and comments contain Cyrillic text. Follow the mandatory UTF-8 workflow in `docs/agents/issue-tracker.md`; never round-trip `gh` output through an unconfigured Windows PowerShell 5.1 pipeline.
 
+### HITL decisions
+
+Before asking the owner to choose among meaningful product, system, or architecture alternatives, provide an evidence-based decision briefing and your recommendation. Follow `docs/agents/hitl-decisions.md`.
+
 ### Triage labels
 
 Triage uses the canonical `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` labels. See `docs/agents/triage-labels.md`.
