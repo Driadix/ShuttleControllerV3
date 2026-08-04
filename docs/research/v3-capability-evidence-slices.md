@@ -52,7 +52,7 @@ Bundle покрывает все 13 root operation types каталога V3, у
 7. `ACK_OK` (`L2871`) с radio telemetry override `predictTelemetryStateForAcceptedCommand` (`L8271-L8292`); повторная проверка `canAcceptCommandNow` при присвоении `status` в `SystemYield` (`L6975-L7039`).
 8. `loop()` IDLE: повторный тройной опрос CHANNEL (`L1829-L1833`), `currentOperation = mapCmdToOperation(status)` (`L1843`), `lastPalletePosition = 0` (`L1845`), `currentMode = AUTO_EXEC` (`L1870`), `run_Cmd()` (`L1898-L1900`), завершение `if (status != CMD_STOP) status = 0; currentOperation = STATE_IDLE; currentMode = IDLE` (`L1902-L1907`).
 
-Dispatch-таблица `run_Cmd()` для каталога: `Cntrl_V2/Cntrl_V2.ino:L3228-L3396` (LIFT `L3244-L3257`, LOAD `L3265-L3272`, UNLOAD `L3273-L3283`, MOVE_DIST_R/F `L3284-L3297`, CALIBRATE `L3298-L3307`, DEMO `L3308-L3312`, COUNT_PALLETS `L3313-L3324`, COMPACT_F `L3330-L3338`, COMPACT_R `L3339-L3348`, LONG_LOAD `L3349-L3358`, LONG_UNLOAD `L3359-L3373`, LONG_UNLOAD_QTY `L3374-L3390`, HOME `L3391-L3395`).
+Dispatch-таблица `run_Cmd()` для каталога: `Cntrl_V2/Cntrl_V2.ino:L3228-L3397` (LIFT `L3244-L3257`, LOAD `L3265-L3272`, UNLOAD `L3273-L3283`, MOVE_DIST_R/F `L3284-L3297`, CALIBRATE `L3298-L3307`, DEMO `L3308-L3312`, COUNT_PALLETS `L3313-L3324`, COMPACT_F `L3330-L3338`, COMPACT_R `L3339-L3348`, LONG_LOAD `L3349-L3358`, LONG_UNLOAD `L3359-L3373`, LONG_UNLOAD_QTY `L3374-L3390`, HOME `L3391-L3395`).
 
 Общие исходы (behavior map верхнего уровня):
 
@@ -91,7 +91,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 1. MoveDistance (CMD_MOVE_DIST_F = 0x13, CMD_MOVE_DIST_R = 0x12)
 
 #### Entry points и call sites
-- Константы команд: `SP.h:99-100` (`CMD_MOVE_DIST_R = 0x12`, `CMD_MOVE_DIST_F = 0x13`, комментарий "Requires MSG_CMD_WITH_ARG"); `MSG_CMD_WITH_ARG = 0x31` (`SP.h:62`), пакет `ParamCmdPacket { int32_t arg; uint8_t cmdType; }` (`SP.h:366-371`).
+- Константы команд: `SP.h:99-100` (`CMD_MOVE_DIST_R = 0x12`, `CMD_MOVE_DIST_F = 0x13`, комментарий "Requires MSG_CMD_WITH_ARG"); `MSG_CMD_WITH_ARG = 0x31` (`SP.h:62`), пакет `ParamCmdPacket { int32_t arg; uint8_t cmdType; }` (`SP.h:367-371`).
 - В supported-списке: `isSupportedCommand` (`.ino:8351-8384`), обе команды на строках 8364-8365. Хелпер `isManualDistanceCommand` (`.ino:8391-8394`).
 - Dispatch-путь (автономный): SystemYield опрашивает UART'ы (`pollSerial(SerialDisplay...)` `.ino:6950`, `pollSerial(SerialLora...)` `.ino:6954`) → `processPacket` (`.ino:2713`) → ветка `MSG_CMD_SIMPLE || MSG_CMD_WITH_ARG` (`.ino:2777`) → возврат `reqCmd` (`.ino:2872`) → `status = cmdRad` (`.ino:6987`) или `status = cmdDisp` (`.ino:7018`) → `loop()` case `CoreOpMode::IDLE` (`.ino:1824-1896`) → `currentMode = CoreOpMode::AUTO_EXEC` (`.ino:1867-1871`) → `run_Cmd()` (`.ino:1900`) → ветки `CMD_MOVE_DIST_R` (`.ino:3284-3290`) / `CMD_MOVE_DIST_F` (`.ino:3291-3297`): `send_Cmd(); moove_Distance_X(mooveDistance); status = CMD_STOP; send_Cmd();`.
 - Dispatch-путь (ручная сессия): case `CoreOpMode::MANUAL`, ветка `CMD_MOVE_DIST_R || CMD_MOVE_DIST_F` (`.ino:1921-1952`) → `moove_Distance_F(mooveDistance)` (`.ino:1934`) / `moove_Distance_R(mooveDistance)` (`.ino:1938`).
@@ -117,7 +117,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 4. `motor_Start_Forward()` (`.ino:4834`): ToF freshness gate для forward-слота; при успехе `motorStart=1, motorReverse=0`. `get_Distance()` (`.ino:4835`).
 5. Цикл `while (moove)` (`.ino:4838`): каждый оборот - `SystemYield()` (`.ino:4840`), `shouldAbortLoop()` → `preserveManualStopOnAbort()` + `motor_Stop()` + return (`.ino:4841-4846`), `blink_Work()` (`.ino:4847`), `get_Distance()` (`.ino:4848`).
 6. Управляющий тик каждые 50 ms: `if (millis() - count > 50)` (`.ino:4849`): `set_Position()` (`.ino:4851`); повторное чтение AS5600 (`.ino:4852`); при неудаче - `motor_Stop(); status = CMD_STOP; return` (`.ino:4853-4856`).
-7. Интеграция пройденного пути: `diff` вычисляется по разности углов с 4 wrap-кейсами, калибровочные коэффициенты `calibrateEncoder_F[8]` при `!inverse`, иначе `calibrateEncoder_R[8]` (`.ino:4858-4935`; секторы по 512 единиц из 4096); `diff < 0 → 0` (`.ino:4936`); при `diff != 0`: `dist -= diff; startAngle = currentAngle; cnt = millis()` (`.ino:4937-4940`) - сброс no-progress таймера.
+7. Интеграция пройденного пути: `diff` вычисляется по разности углов с 4 wrap-кейсами, калибровочные коэффициенты `calibrateEncoder_F[8]` при `!inverse`, иначе `calibrateEncoder_R[8]` (`.ino:4858-4935`; секторы по 512 единиц из 4096); `diff < 0 → 0` (`.ino:4933-4934`); при `diff != 0`: `dist -= diff; startAngle = currentAngle; cnt = millis()` (`.ino:4935-4940`) - сброс no-progress таймера.
 8. Выбор скорости (`.ino:4942-4975`):
    - `distance[1] >= maxSpeed*15 && dist >= maxSpeed*15` → `motor_Speed(maxSpeed)`;
    - `distance[1] <= 90 + chnlOffset` → `motor_Stop(); moove = 0; currentPosition = 0` (конец канала, `.ino:4946-4951`);
@@ -217,7 +217,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 7. lifter_Down: ramp `+j*1000` (`.ino:2465-2482`), полная `+50000` (`.ino:2486`), цикл `while (digitalRead(DL_DOWN))` (`.ino:2493`), timeout аналогичен (`.ino:2501-2508`); эпилог: `lifterUp = 0` (`.ino:2515-2516`), `lifter_Stop()`, `load = 0`, `lifterCurrent = 0` (`.ino:2517-2519`), `liftDownCounter++` (`.ino:2520`). Дополнительной записи полной скорости после цикла нет (асимметрия с Up).
 
 #### Stop/fault/abort
-- CMD_STOP/CMD_STOP_MANUAL: `shouldAbortLoop()` проверяется в каждом 30 ms шаге ramp и каждом обороте основного цикла (`.ino:2388`, `.ino:2407`, `.ino:2469` (down ramp), `.ino:2496`); abort → `preserveManualStopOnAbort(); return` - лифт остаётся в промежуточном положении, `lifter_Stop()` НЕ вызывается в abort-пути (только preserve+return).
+- CMD_STOP/CMD_STOP_MANUAL: `shouldAbortLoop()` проверяется в каждом 30 ms шаге ramp и каждом обороте основного цикла (`.ino:2388`, `.ino:2407`, `.ino:2477` (down ramp), `.ino:2496`); abort → `preserveManualStopOnAbort(); return` - лифт остаётся в промежуточном положении, `lifter_Stop()` НЕ вызывается в abort-пути (только preserve+return).
 - Fault во время исполнения: любой active fault → `shouldAbortLoop()` → тот же выход. `FAULT_LIFTER_TIMEOUT` latch-ится самой функцией по `lifterDelay` (`.ino:2415`/`.ino:2504`, `SP.h:179`, бит 1<<9), после неё `status = CMD_STOP`, `break` → эпилог выполняется (включая возможную установку `lifterUp = 1`, см. Unknowns).
 - Отказ сенсоров: концевики не опрашиваются на отказ; ToF-сенсоры опрашиваются (`get_Distance` в цикле) и способны latch-ить ToF-fault → abort через `shouldAbortLoop`.
 - SystemYield вызывается в каждом ожидании (ramp и основной цикл); `delay(10)` в основном цикле блокирующий (`.ino:2420`).
@@ -342,7 +342,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### Сквозные замечания (мёртвый код, ordering-баги, асимметрии)
 
 1. Ordering-баг (F): клампизация `minSpeed > maxSpeed` до dist-капов (`.ino:4822-4829`) - после капа maxSpeed может стать меньше minSpeed; в R порядок корректный (`.ino:5021-5034`). Зафиксировано, не интерпретируется.
-2. Асимметрия F/R: F клампит `maxSpeed < 2`, R клампит `maxSpeed < 5` (`.ino:4820` vs `.ino:5031`); F принимает `diff != 0` после clamp (`.ino:4936-4937`), R требует `diff > 0` (`.ino:5137`).
+2. Асимметрия F/R: F клампит `maxSpeed < 2`, R клампит `maxSpeed < 5` (`.ino:4820` vs `.ino:5031`); F принимает `diff != 0` после clamp (`.ino:4935-4940`), R требует `diff > 0` (`.ino:5137`).
 3. Мёртвый config `lifter_Speed` (`.ino:1645`, EEPROM `.ino:7594`/`.ino:7628`) - не используется в lifter_Up/Down.
 4. `accel = 18` (`.ino:2096`) используется только в ветке торможения без lifterUp; в ветке разгона всегда перезаписывается (`.ino:2123-2127`).
 5. lifter_Up эпилог: дополнительная запись кадра полной скорости после выхода из цикла (`.ino:2438`) и возможное деление на k==0 (`.ino:2442`); lifter_Down симметричных записей не имеет.
@@ -1697,4 +1697,21 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 
 ## Независимый checklist-review по gate legacy evidence ready
 
-_REVIEW PENDING_
+Независимая техническая ревизия отдельной сессией, не участвовавшей в извлечении evidence (2026-08-04). Проверено по первоисточнику `Driadix/ShuttleController@708d090980155d4a8d4644f7bcf87c383e81cd1d`.
+
+**Итог gate: PASS.**
+
+Результаты по пунктам checklist (issue 6):
+
+1. Entry points и call sites - PASS: dispatch `run_Cmd()` прочитан целиком (`Cntrl_V2/Cntrl_V2.ino:L3228-L3397`), MANUAL-ветки loop (`L1911-L2048`) сверены, косвенные call sites `load_Pallete`/`unload_Pallete` подтверждены grep (single_Load, compact F/R, long load/unload, demo).
+2. Normal / rejection / stop / fault / recovery paths - PASS: для каждой операции доведены до наблюдаемого результата; recovery описан ссылкой на канонический системный item (допустимо в модели bundle).
+3. Source/authority, provisioning, lifecycle, профили - PASS: display/radio-асимметрии, provisioning-правила, IDLE/MANUAL/AUTO_EXEC/ERROR и все профильные ветки 800/1000/1200 сверены с grep по `shuttleLength ==`.
+4. Сверка с системным индексом - PASS: shared state, CAN/I2C/UART, actuator ownership, persistence и safety paths без молчаливых противоречий; дельты заявлены явно в impact set выше.
+5. Каноничность общих фактов - PASS: cross-cutting факты применяются со ссылкой на канонические items; повторяемые константы консистентны во всех разделах.
+6. Dispositions - PASS: каждый раздел содержит предложения preserve/change/exclude/unknown с оговоркой «предложения, не решения»; факты отделены от суждений.
+7. Configured vs inferred - PASS: классы выдержаны; нигде не заявлены measured или доказанные end-to-end bounds.
+8. Unknowns - PASS: блокирующие U01-U10 классифицированы по правилу риска с владельцем, стадией и условием пересмотра; неблокирующие оформлены как assumptions/validation obligations.
+
+Выборочная проверка anchors: 38 групп anchors прочитаны по первоисточнику (требовалось >= 15), все утверждения о поведении кода подтверждены. Покрытие операций 13/13; `Evacuate` подтверждён как enum-only (ровно 2 вхождения в production-файлах).
+
+Findings ревизии и их обработка: 5 minor-неточностей в номерах строк anchors без семантических ошибок (lifter_Down ramp abort: 2469 -> фактическая 2477; `diff < 0` clamp: 4936 -> 4933-4934; `diff != 0` блок: 4936-4937 -> 4935-4940; диапазон `ParamCmdPacket`: 366-371 -> 367-371; граница `run_Cmd` в сводном скелете: 3396 -> 3397) - исправлены точечной правкой в настоящей версии. Блокирующих ошибок не найдено.
