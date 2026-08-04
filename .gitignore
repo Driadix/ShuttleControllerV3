@@ -14,3 +14,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Agent-generated review and temporary files
+.tmp/
+.lavish/
