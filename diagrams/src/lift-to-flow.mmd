@@ -46,6 +46,9 @@ flowchart TD
     LOOP -.->|stop в любой момент| STP
     RAMP -.->|надзор: детектирован отказ| F_SF
     LOOP -.->|надзор: детектирован отказ| F_SF
+    TICK --> Q3
+    RAMP -.->|safety precedence| SAF
+    LOOP -.->|safety precedence| SAF
     SAF -.->|исход по правилам Safety & Health| PUB
     OK --> PUB
     CXL --> PUB
