@@ -1,0 +1,69 @@
+flowchart TD
+    REQ["Запрос операции<br/>от авторизованного источника:<br/>Control Client, Service Client,<br/>Safety Authority"]
+
+    subgraph ADM["Admission - атомарная граница запроса и экземпляра"]
+        direction TB
+        A1["Проверка envelope: controllerEpoch,<br/>authority, operationType, parameters"]
+        A2["Preconditions и safety permit:<br/>provisioning, fault state,<br/>in-channel, эксклюзивность"]
+        A3["Композиция и delegation,<br/>idempotency и conflict,<br/>доступность ресурсов"]
+        A1 --> A2 --> A3
+    end
+
+    REJ["Rejected: стабильный rejection code,<br/>экземпляр не создаётся,<br/>частичных резервирований нет"]
+    ACC["Accepted: экземпляр создан,<br/>operationId выдан firmware,<br/>ресурсы зарезервированы"]
+
+    subgraph RUN["Running - доменный алгоритм операции"]
+        direction TB
+        SENSE["Sensing: расстояния, позиция,<br/>паллетные датчики, концевики,<br/>наличие в канале, питание"]
+        STEP["Доменные шаги и переходы.<br/>ТОЧКА ПЕРЕХОДА: дальнейший ход<br/>задаёт per-operation алгоритм"]
+        ACT["Actuation: привод движения,<br/>лифтер"]
+        WAIT["Ожидания и повторения:<br/>явные условия входа и выхода,<br/>повторы - новые child instances"]
+        SENSE --> STEP
+        STEP --> ACT
+        ACT --> SENSE
+        STEP -.-> WAIT -.-> STEP
+    end
+
+    subgraph SUP["Непрерывный safety надзор (параллельно любой активности)"]
+        direction TB
+        SG1["Freshness направленного sensing<br/>до старта и во время движения"]
+        SG2["Столкновение, перегрузка лифтера,<br/>stall, питание ниже порога"]
+    end
+
+    subgraph MAN["Manual Control Session - эксклюзивный lease"]
+        direction TB
+        M1["Выдача сессии: lease"]
+        M2["Hold-to-run intents<br/>продлевают lease"]
+        M3["Потеря lease"]
+        M1 --> M2 --> M3
+    end
+
+    STOP["Stop intent авторизованного источника<br/>(идемпотентен)"]
+    STP["Stopping: propagation на descendants,<br/>детерминированный безопасный останов<br/>actuator-ов, освобождение delegation"]
+    CXL["Cancelled"]
+    OK["Succeeded: доменная цель достигнута"]
+    FLT["Failed: код класса fault<br/>(детектированный внутренний отказ)"]
+    DOM["Failed: код класса domain-condition<br/>(наблюдаемое состояние мира,<br/>цель недостижима)"]
+    SAF["Safety interruption: Safety Authority<br/>применяет precedence; возможен Evacuate.<br/>Точный исход делегирован Safety & Health"]
+
+    PUB["Terminal outcome опубликован:<br/>typed code, диагностический context,<br/>snapshot обновлён, ресурсы освобождены"]
+
+    REQ --> ADM
+    A1 -->|не пройден| REJ
+    A2 -->|не пройден| REJ
+    A3 -->|не пройден| REJ
+    A3 -->|пройден| ACC
+    ACC --> RUN
+    STEP -->|доменная цель достигнута| OK
+    STOP --> STP
+    M3 --> STP
+    STP --> CXL
+    STP -->|безопасный останов<br/>не может завершиться| FLT
+    SUP -->|детектирован отказ| FLT
+    STEP -->|цель недостижима по состоянию мира| DOM
+    SUP -->|safety precedence| SAF
+    OK --> PUB
+    CXL --> PUB
+    FLT --> PUB
+    DOM --> PUB
+    SAF -->|после завершения безопасных действий,<br/>исход по правилам Safety & Health| PUB
