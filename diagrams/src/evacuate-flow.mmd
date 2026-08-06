@@ -1,0 +1,60 @@
+flowchart TD
+    TRIG["Триггер эвакуации:<br/>Safety Authority (safety precedence)<br/>или Control Client<br/>(V3 addition, решение владельца)"]
+    ADM["Admission по authority:<br/>envelope, epoch, полномочия,<br/>preconditions по safety contract,<br/>эксклюзивность ресурсов<br/>(V3 addition, решение владельца)"]
+    REJ["Rejected: стабильный rejection code,<br/>экземпляр не создаётся"]
+    ACC["Accepted: экземпляр создан,<br/>владение приводом движения и лифтером,<br/>причина запуска и trace context<br/>(V3 addition, решение владельца)"]
+
+    S1["Начальная оценка состояния:<br/>позиция относительно начала канала,<br/>состояние лифтера"]
+    Q0{"Шаттл уже у начала канала<br/>и лифтер опущен?"}
+    Q1{"Разрешение MotionFreshnessPermit<br/>по freshness направленного sensing<br/>пройдено?"}
+
+    subgraph RUN["Running - движение к началу канала<br/>(V3 addition, решение владельца)"]
+        direction TB
+        TICK["Управляющий тик:<br/>примитивы движения, надзор,<br/>обслуживание sensing"]
+    end
+
+    Q2{"Начало канала достигнуто?"}
+    FINSTOP["Безопасный останов<br/>у начала канала"]
+
+    subgraph LIFT["Опускание лифтера<br/>(V3 addition, решение владельца)"]
+        direction TB
+        LTICK["Итерация хода лифтера вниз:<br/>примитив лифтера, концевики,<br/>надзор"]
+    end
+
+    Q3{"Опущенное состояние<br/>подтверждено концевиком?"}
+
+    STOP["Stop intent авторизованного источника<br/>(принимается в любой момент)"]
+    STP["Stopping: детерминированный безопасный<br/>останов actuator-ов, освобождение ресурсов"]
+    SAF["Safety interruption: precedence надзора.<br/>Точный исход делегирован Safety & Health"]
+
+    OK["Succeeded: шаттл у начала канала,<br/>лифтер опущен, безопасный останов"]
+    CXL["Cancelled"]
+    F_SF["Failed (fault): потеря freshness sensing,<br/>столкновение, stall, питание, отказ sensing;<br/>коды типа - предложения (NoMotionProgress,<br/>LiftTravelTimeout, PositionReadFault)"]
+    PUB["Terminal outcome опубликован:<br/>typed code, диагностический контекст,<br/>snapshot обновлён, ресурсы освобождены"]
+
+    TRIG --> ADM
+    ADM -->|отклонён| REJ
+    ADM -->|принят| ACC --> S1 --> Q0
+    Q0 -->|да| OK
+    Q0 -->|нет| Q1
+    Q1 -->|провал| F_SF
+    Q1 -->|пройден| RUN
+    RUN --> Q2
+    Q2 -->|нет| TICK
+    TICK --> Q2
+    Q2 -->|да| FINSTOP --> LIFT
+    LIFT --> Q3
+    Q3 -->|да| OK
+    Q3 -->|нет| LTICK
+    LTICK --> Q3
+    STOP --> STP --> CXL
+    RUN -.->|stop в любой момент| STP
+    LIFT -.->|stop в любой момент| STP
+    RUN -.->|надзор: детектирован отказ| F_SF
+    LIFT -.->|надзор: детектирован отказ| F_SF
+    RUN -.->|safety precedence| SAF
+    LIFT -.->|safety precedence| SAF
+    SAF -.->|исход по правилам Safety & Health| PUB
+    OK --> PUB
+    CXL --> PUB
+    F_SF --> PUB
