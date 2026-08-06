@@ -1,0 +1,98 @@
+flowchart TD
+    ACC["Accepted: экземпляр создан,<br/>эксклюзивное владение приводом<br/>движения и лифтером"]
+    QDIR{"direction = forward?"}
+
+    subgraph FWD["Forward - уплотнение к заднему концу канала"]
+        direction TB
+        F1["Опускание платформы,<br/>если она поднята"]
+        F2["Проезд к заднему концу канала;<br/>уточнение опорной длины канала;<br/>при поднятой платформе -<br/>останов перед паллетой и опускание"]
+        F3["Начальное sensing:<br/>расстояния, паллетные датчики"]
+        subgraph FAPP["Цикл подхода"]
+            direction TB
+            F4["Шаг вперёд к штабелю<br/>с торможением по остатку<br/>до переднего торца"]
+        end
+        QF1{"Паллета в ближней зоне,<br/>сенсоры сработали,<br/>шаттл не у переднего торца?"}
+        subgraph FREL["Цикл перестановки - подоперация load_Pallete"]
+            direction TB
+            F5["Заезд под переднюю доску,<br/>дожим, подъём паллеты"]
+            F6["Перевозка к заднему концу,<br/>постановка с межпаллетной<br/>дистанцией, опускание"]
+        end
+        QF2{"Шаттл достиг переднего торца<br/>при опущенной платформе?"}
+        F1 --> F2 --> F3
+        F3 --> QF1
+        QF1 -->|да| F4
+        F4 --> QF1
+        QF1 -->|нет| FREL
+        F5 --> F6
+        FREL --> QF2
+        QF2 -->|нет| FREL
+    end
+
+    subgraph REV["Reverse - уплотнение к началу канала"]
+        direction TB
+        R1["Проезд к началу канала;<br/>при поднятой платформе -<br/>останов перед паллетой и опускание"]
+        R2["Начальное sensing:<br/>расстояния, паллетные датчики"]
+        subgraph RAPP["Цикл подхода"]
+            direction TB
+            R3["Шаг назад к штабелю<br/>с торможением по остатку<br/>до заднего торца"]
+        end
+        QR1{"Паллета в ближней зоне,<br/>сенсоры сработали,<br/>шаттл не у заднего торца?"}
+        subgraph RREL["Цикл перестановки - подоперация unload_Pallete"]
+            direction TB
+            R4["Заезд под переднюю доску,<br/>дожим, подъём паллеты"]
+            R5["Перевозка к началу канала,<br/>постановка с межпаллетной<br/>дистанцией, опускание"]
+        end
+        QR2{"Шаттл достиг заднего торца<br/>при опущенной платформе?"}
+        R1 --> R2
+        R2 --> QR1
+        QR1 -->|да| R3
+        R3 --> QR1
+        QR1 -->|нет| RREL
+        R4 --> R5
+        RREL --> QR2
+        QR2 -->|нет| RREL
+    end
+
+    D_CHF["Failed (domain-condition): ChannelFull -<br/>ёмкость канала исчерпана"]
+    D_PSE["Failed (domain-condition): PalletSizeError -<br/>паллета длиннее допустимого предела"]
+    D_OBS["Failed (domain-condition): ObstacleAhead -<br/>препятствие, двойное штабелирование"]
+    D_PNF["Failed (domain-condition): PalletNotFound -<br/>нет места для постановки (reverse)"]
+    W_CONT["Warning-событие ObstacleAhead<br/>(поисковый таймаут): статус не меняется,<br/>цикл перестановки продолжается<br/>либо завершается по естественному условию"]
+
+    STOP["Stop intent авторизованного источника<br/>(принимается в любой момент)"]
+    STP["Stopping: детерминированный безопасный<br/>останов actuator-ов, освобождение ресурсов"]
+    CXL["Cancelled"]
+    FLT["Failed (fault): MotorStall, LifterTimeout,<br/>отказы sensing, сквозные paths надзора"]
+    SAF["Safety interruption: precedence надзора.<br/>Точный исход делегирован Safety & Health"]
+    OK["Succeeded: штабель переставлен<br/>к целевому концу канала - шаттл достиг<br/>противоположного торца при опущенной платформе"]
+    PUB["Terminal outcome опубликован:<br/>typed code, диагностический контекст,<br/>snapshot обновлён, ресурсы освобождены"]
+
+    ACC --> QDIR
+    QDIR -->|да| FWD
+    QDIR -->|нет| REV
+    FREL -.->|warning: канал забит| D_CHF
+    FREL -.->|warning: размер паллеты| D_PSE
+    FREL -.->|warning: препятствие,<br/>двойное штабелирование| D_OBS
+    RREL -.->|warning: размер паллеты| D_PSE
+    RREL -.->|warning: нет места постановки| D_PNF
+    FREL -.->|поисковый таймаут,<br/>warning без смены статуса| W_CONT
+    RREL -.->|поисковый таймаут,<br/>warning без смены статуса| W_CONT
+    W_CONT -.->|продолжение цикла| FREL
+    W_CONT -.->|продолжение цикла| RREL
+    QF2 -->|да| OK
+    QR2 -->|да| OK
+    STOP --> STP --> CXL
+    FWD -.->|stop в любой момент| STP
+    REV -.->|stop в любой момент| STP
+    FWD -.->|детектирован отказ| FLT
+    REV -.->|детектирован отказ| FLT
+    FWD -.->|safety precedence| SAF
+    REV -.->|safety precedence| SAF
+    SAF -.->|исход по правилам Safety & Health| PUB
+    OK --> PUB
+    CXL --> PUB
+    FLT --> PUB
+    D_CHF --> PUB
+    D_PSE --> PUB
+    D_OBS --> PUB
+    D_PNF --> PUB
