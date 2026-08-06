@@ -1,0 +1,70 @@
+flowchart TD
+    ACC["Accepted: экземпляр создан,<br/>эксклюзивное владение приводом движения и лифтером,<br/>флаг длительной работы: паллета удерживается<br/>поднятой до конца цикла"]
+
+    PREP["Подготовка: опускание платформы, выезд к началу канала,<br/>разреживание межпаллетной дистанции,<br/>FIFO/LIFO-инверсия при включённом режиме"]
+
+    subgraph LOOP["Running - цикл выгрузки:<br/>пока задание не исчерпано и канал не пуст"]
+        direction TB
+        Q_START{"Задание исчерпано?"}
+        TICK["Итерация: публикация телеметрии прогресса,<br/>подоперация unload_Pallete:<br/>подъезд к паллете, поиск досок задним ходом,<br/>контроль длины, подъём, перехват при потере датчиков,<br/>вывоз паллеты к началу канала"]
+        Q_EMPTY{"Канал пуст:<br/>шаттл у заднего конца канала?"}
+        WAIT["Ожидание освобождения<br/>зоны впереди"]
+        APPR["Подъезд к началу канала<br/>(ступенчатая скорость)"]
+        LOWER["Опускание паллеты,<br/>декремент задания"]
+        Q_RET{"Остались паллеты<br/>в задании?"}
+        RET["Отъезд назад к следующей паллете<br/>(RetreatDistance)"]
+    end
+
+    Q_SIZE{"Длина паллеты<br/>вне допуска?"}
+    Q_SPACE{"Нет свободной зоны впереди<br/>для вывоза паллеты?"}
+    Q_RECAP{"Паллета потеряна в перехвате,<br/>достигнут задний конец канала?"}
+    Q_BSRCH{"Таймаут поиска досок?"}
+
+    STOP["Stop intent авторизованного источника<br/>(принимается в любой момент)"]
+    STP["Stopping: детерминированный безопасный<br/>останов приводов, освобождение ресурсов"]
+    SAF["Safety interruption: precedence надзора.<br/>Точный исход делегирован Safety & Health"]
+
+    FIN["Завершение цикла: восстановление межпаллетной<br/>дистанции и инверсии, сброс счётчика задания,<br/>снятие флага длительной работы"]
+    Q_EARLY{"Прерывание активно<br/>в глубине канала?"}
+    EXIT["Финальный выезд<br/>к началу канала"]
+
+    OK["Succeeded: задание выгружено<br/>(qty паллет или канал пуст)"]
+    CXL["Cancelled"]
+    F_TO["Failed (fault): LiftTravelTimeout,<br/>MoveNoProgress, отказ sensing,<br/>stall, питание"]
+    D_SIZE["Failed (domain-condition):<br/>PalletSizeError"]
+    D_SPACE["Failed (domain-condition):<br/>NoSpaceAhead"]
+    D_RECAP["Failed (domain-condition):<br/>PalletLostAtChannelEnd"]
+    WARN["Observable event: PalletSearchTimeout,<br/>продолжение цикла"]
+    PUB["Terminal outcome опубликован:<br/>typed code, диагностический контекст,<br/>snapshot обновлён, ресурсы освобождены"]
+
+    ACC --> PREP --> Q_START
+    Q_START -->|да| FIN
+    Q_START -->|нет| TICK
+    TICK --> Q_EMPTY
+    Q_EMPTY -->|да| FIN
+    Q_EMPTY -->|нет| WAIT --> APPR --> LOWER --> Q_RET
+    Q_RET -->|да| RET --> Q_START
+    Q_RET -->|нет| FIN
+    TICK -.->|в подоперации| Q_SIZE
+    Q_SIZE -->|да| D_SIZE
+    TICK -.->|в подоперации| Q_SPACE
+    Q_SPACE -->|да| D_SPACE
+    TICK -.->|в подоперации| Q_RECAP
+    Q_RECAP -->|да| D_RECAP
+    TICK -.->|в подоперации| Q_BSRCH
+    Q_BSRCH -->|да| WARN --> Q_EMPTY
+    STOP --> STP --> CXL
+    LOOP -.->|stop в любой момент| STP
+    LOOP -.->|надзор: детектирован отказ| F_TO
+    LOOP -.->|safety precedence| SAF
+    FIN --> Q_EARLY
+    Q_EARLY -->|stop| CXL
+    Q_EARLY -->|fault| F_TO
+    Q_EARLY -->|нет| EXIT --> OK
+    SAF -.->|исход по правилам Safety & Health| PUB
+    OK --> PUB
+    CXL --> PUB
+    F_TO --> PUB
+    D_SIZE --> PUB
+    D_SPACE --> PUB
+    D_RECAP --> PUB
