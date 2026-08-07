@@ -66,12 +66,12 @@ Authority остаточных рисков — **владелец, через G
 Initializing → Ready ↔ Degraded → Fault
 ```
 
-- **Initializing**: стартап, движение запрещено; grace-окно (V1 baseline 1 s) + requalification health-gates; выход — только по готовности (INV-STARTUP-GATE). Reset-cause-aware: при pending explicit-reset маркере из Backup SRAM (Q5 v2) — переход в `Fault`, минуя Ready.
+- **Initializing**: стартап, движение запрещено; grace-окно (V1 baseline 1 s) + requalification health-gates; выход — только по готовности (INV-STARTUP-GATE). Reset-cause-aware: при pending explicit-reset маркере из Backup SRAM (Q5 A) — переход в `Fault`, минуя Ready.
 - **Ready**: движение разрешено; все health-gates проходят (свежесть, fault-маска пуста, watchdog здоров).
 - **Degraded**: движение ограничено по capability-классам (конкретные ограничения — item 4 `Capability & Operation Contracts`; здесь: движение только при выполнении motion-инвариантов INV-SENSING-FRESH и INV-OBSTACLE-CLASSIFY). Вход — degraded-условия (HZ-05/06/13/14/16); выход — снятие условия. Событие + warning, никогда молча. **F5 (ревью, решение владельца):** в Degraded действует **потолок скорости ≤ 1.0 м/с** (утверждено владельцем); временной bound `T_deg` → Fault/stop — рекомендация ревью, **не утверждена**, вопрос для #48; ограничение не откладывается в item 4.
 - **Fault**: latched fault; движение запрещено для operation/manual intents; воронка допускает только safety-intents, авторизованные Safety Authority (bounded, с метаданными границ), stop/force-stop и recovery-пути (Q2 поправка: единый Fault + правило допуска; fault-классы ProtectiveStop/EvacuationRequired отклонены — V1 low-battery исполняет движение до latch, эвакуация — динамическая авторизация, не свойство класса).
 
-Переходы (Q5 v2): `Ready/Degraded → Fault` — любой latched fault; `Fault → Degraded/Ready` — только после qualified stationary recovery + (для crash-класса) явного acknowledgment (reset-error); power-cycle не считается acknowledgment; low-battery — qualified-clear по fresh sample.
+Переходы (Q5 A): `Ready/Degraded → Fault` — любой latched fault; `Fault → Degraded/Ready` — только после qualified stationary recovery + (для crash-класса) явного acknowledgment (reset-error); power-cycle не считается acknowledgment; low-battery — qualified-clear по fresh sample.
 
 ## 3. Safety-инварианты (Q3)
 
