@@ -35,7 +35,7 @@
 | HZ-13 | commissioning, service × Config & Profile | невалидная/отсутствующая конфигурация, непровиженный шаттл | движение с неверной геометрией | M | валидация профилей, unprovisioned ID 0 | motion запрещено до provisioning; валидация профилей 800/1000/1200 | Degraded (motion off) | отказ admission | provisioning flow | операторская ошибка | host: валидация; #50 | owner |
 | HZ-14 | все контексты × Persistence (flash) | повреждение журнала конфигурации, power-cut при save | потеря конфигурации/калибровок | M | CRC16 журнала, маркеры | journal-механика, атомарность; quiescence (C6); восстановление калибровок (#43) | Degraded (defaults, unprovisioned) | fault/warning, defaults | восстановление из журнала | потеря неподтверждённых настроек | proving #3, #11; host | owner |
 | HZ-15 | update × Update Authority, Persistence | power-cut/битый образ при update | «кирпич», нерабочая прошивка | H | staged-маркер, проверка образа | staged + rollback, recovery mode; INV-UPDATE-STATIONARY | Degraded (recovery mode) | отказ активации, откат | восстановление из recovery | окно неработоспособности | proving #11 (power-cut mid-update) | owner |
-| HZ-16 | все контексты × ADC, BMS | перегрев MCU/батареи | повреждение, отказ | L (confidence: low) | ATEMP (V1), BMS-температура (детали неизвестны) | мониторинг, low-battery реакции | Degraded | warning → stop по порогам | охлаждение → recovery | не определено | host; требует решения по порогам | owner, unknown |
+| HZ-16 | все контексты × ADC, BMS | перегрев MCU/батареи | повреждение, отказ | L (confidence: low) | ATEMP (V1), BMS-температура (детали неизвестны) | мониторинг, low-battery реакции | Degraded | warning → stop по порогам | охлаждение → recovery | не определено | host; требует решения по порогам | owner (open-obligation: #48/#50, до G2) |
 | HZ-17 | все контексты × BMS (RS-485) | потеря наблюдения BMS → неизвестный SOC | глубокий разряд, застревание в проходе | M (confidence: low — нет полевых данных) | BMS staleness после T_bms_stale (V1: только warning — BmsDdA5.hpp:74-75, Cntrl_V2.ino:7702-7706) | warning + событие + лог; работа продолжается — **явный acceptance владельца (F9)** | Degraded (информационно) | warning, продолжение рабочего процесса | восстановление BMS-связи | глубокий разряд — принятый риск (покрытие внешним BMS-контроллером не подтверждено) | host: staleness-логика; T_bms_stale — #48 | owner (accepted, F9) |
 
 ### 1.3 Disposition V1-таксономии (evidence)
@@ -94,7 +94,7 @@ Initializing → Ready ↔ Degraded → Fault
 | INV-FORCE-STOP-CHANNEL | force-stop вне очередей, всегда транслируем (min ID + выделенный mailbox) | #43 keep |
 | INV-STARTUP-GATE | движение ⇒ Ready-статус Safety (после grace + requalification + reconciliation reset-cause; механика маркера — Q5 A) | V1/#43 keep (Q5 A) |
 | INV-BRAKE-VALIDITY | тормозная способность проверена: на commissioning + ручные проверки по плану ТО (внешний контроль чеклистами, в firmware не регистрируется); D_brake — обслуживаемый параметр, bound дрейфа = сервисный интервал (#48) | F3 ревью, решение владельца |
-| INV-CAN-FAILSAFE | отказ CAN-шины ⇒ stop-intent + fault; безопасность не зависит только от CAN TX | Q7 (Unknown #43) |
+| INV-CAN-FAILSAFE | отказ CAN-шины ⇒ stop-intent + fault; безопасность не зависит только от CAN TX; fail-safe приводов верифицирован per-device commissioning-тестом (Q7.1 A) | Q7.1 A (решено) |
 
 ## 4. Precedence и stop-профили (Q4)
 
@@ -172,7 +172,7 @@ Initializing → Ready ↔ Degraded → Fault
 
 - **C6 (quiescence):** datasheet worst case `W_flash ≤ 4 s` — проектировать против этого bound (не измерения); измерение на PCB решает RAM-exec vs принятие окна (#43 развилка). Следствия: (а) watchdog окно = max(шаг, flash, ISR) + margin ⇒ ≥ 4 s + margin — V1 с окном 10 s консистентен (Unknown «единица аргумента watchdog» закрыт: µs, 10 s); (б) **bumper-события в окне erase — решение владельца (Q7.2)**: первое ребро латчится и обрабатывается после окна (deferred ≤ 4 s); повторные рёбра схлопываются (crash counter недосчёт, принятый риск); force-stop эмиссия отложена до конца окна — окно quiescent, движение остановлено; post-window обработка latch — в proving #3; (в) force-stop эмиссия откладывается до конца окна (≤ 4 s) ⇒ интервал покрывает fail-safe приводов (Q7.1 гейт).
 - **CAN force-stop:** hardware-арбитраж lowest-ID-wins подтверждает дизайн #43 (min extended ID + выделенный mailbox); ABRQ доступен для принудительной замены pending TX (деталь контракта адаптера, #47).
-- **ISR во flash-окне:** deferral ISR до конца окна (≤ 4 s) — подтверждает obligation #3 proving slice; SRAM-вариант (вектор+ISR в RAM) — кандидат обязательного требования, решение — по измерению (#54).
+- **ISR во flash-окне:** deferral ISR до конца окна (≤ 4 s) — подтверждает obligation #3 proving slice; **SRAM-ISR не требуется — решение владельца (Q7.2)**: первое ребро латчится (EXTI/NVIC pending) и обрабатывается после окна; SRAM-вариант остаётся опцией при необходимости (решение по измерению #54).
 
 ### 7.2 Measurement-resolved параметры (обязательства измерения)
 
