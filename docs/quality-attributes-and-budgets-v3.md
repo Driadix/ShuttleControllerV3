@@ -19,7 +19,7 @@
 | Параметр | Значение | Класс источника | Validation obligation |
 | --- | --- | --- | --- |
 | `T_fresh` (ToF, направленная) | 300 ms — решено #45 (O3) | hazard-derived | — |
-| `T_sample_worst` (ToF) | RR 4 сенсора × 8 ms = 32 ms + BMS-quiet 17 ms + radio-паузы ⇒ **≤ 100 ms** (analytical) | code-derived + analytical | #54 #1/#2; C1a: `T_sample_worst + margin < 300 ms` |
+| `T_sample_worst` (ToF) | RR 4 сенсора × 8 ms = 32 ms + BMS-quiet 17 ms + radio-паузы ⇒ **≤ 100 ms** (analytical); C1a-маржа: **margin ≥ 100 ms** (номинал, ≥ 3 RR-цикла + jitter) | code-derived + analytical | #54 #1/#2; C1a: `T_sample_worst + margin < 300 ms` ⇒ measured `T_sample_worst < 200 ms` |
 | `T_step` (bounded step) | **10 ms** (Q5) | analytical | #54 #4/#8 |
 | `T_check_jitter` | ≤ 1 bounded step = 10 ms | analytical | #54 #2 |
 | `T_arb` | ≤ 1 bounded step = 10 ms | analytical | #54 #2 |
@@ -30,7 +30,7 @@
 | `W_flash` | ≤ 4 s (datasheet x8, сектор 128 KB) | datasheet-derived | #54 #3 (измерение на PCB) |
 | `D_brake(v, load, grade)` | кривая, параметр commissioning (INV-BRAKE-VALIDITY) | measured (обязательство) | #54 #1 + полевые тесты |
 | `T_deg` | **60 s** → Fault/stop (Q2) | hazard-derived (решение) | host: health FSM |
-| `T_bms_stale` | **60 s** (Q3) | code-derived + решение | host: staleness-логика |
+| `T_bms_stale` | **120 s** (Q3, коррекция ревью: 60 s = каденции high-load без запаса; 120 s = 2 пропущенных high-load цикла) | code-derived + решение | host: staleness-логика |
 | ATEMP пороги | **warn 90 °C / fault 110 °C**, гистерезис 5 °C (Q4) | решение (HZ-16) | host + полевые данные |
 | Stall no-progress | `W_np` = 5000 ms, `T_np` = 10 mm за окно (Q9) | code-derived + решение | host: no-progress логика; #54 #8 |
 
@@ -44,18 +44,21 @@
 
 **Правило вилки C1b**: интервал `T_sample_worst + margin < 300 ms` (левая часть) подтверждается измерением #54 #1/#2. Правая часть проверяется на измеренных `v_max_phys` (mapping percent→м/с живёт в приводе; measurement obligation) и `D_brake`: если при текущем maxSpeed интервал пуст (`D_brake > 0.37 м` при 1.7 м/с) — **снижение maxSpeed** (порт-предпочтение) до выполнения неравенства; расширение D_accept допускается только с геометрическим обоснованием (зазор до препятствий) и impact review по #45 (O3-приёмка условна на эту вилку). Снижение `T_fresh` ниже 300 ms — не рассматривается (O3, V1 keep).
 
-### 2.2 Degraded (T_deg) — РЕШЕНО (Q2)
+### 2.2 Degraded (T_deg) — РЕШЕНО (Q2, уточнение ревью)
 
 Потолок скорости ≤ 1.0 м/с (F5, #45) остаётся. Добавлен временной bound: **непрерывное пребывание в Degraded > 60 s ⇒ переход Fault/stop** (IEC 61508-2 §7.4.8.3: HFT=0, high-demand — детекция опасного отказа требует specified action; неограниченная degraded-работа на одноканальном safety-пути не имеет стандартного основания). Degraded-условие снимается раньше — Fault не наступает. Новый fault-код (`FAULT_DEGRADED_TIMEOUT`) — в wire-реестр #47. Recovery — по правилам #45 (снятие условия + квалификация). Таймер считает monotonic-время (NTP-скачок не влияет, #43).
+
+**Область действия T_deg (carve-outs)**: отсчёт применяется только к motion-capable degraded-условиям — HZ-05 (деградация сенсорики), HZ-06 (I2C-шина), HZ-16 (перегрев). **Не входит в отсчёт**: информационный Degraded HZ-17 (BMS staleness, F9: работа продолжается, warning-only), stationary-входы HZ-13/HZ-14 (непровиженный/дефолты, motion off), HZ-15 (update/recovery mode — сессия оператора может превышать 60 s; INV-UPDATE-STATIONARY). Отсчёт приостанавливается в Update-окне.
 
 ## 3. Watchdog
 
 - **Формула** (#43): окно = `max(худший bounded шаг, flash-окно, ISR-время) + margin`.
-- **Окно = 10 s** (Q5, V1 keep): `max(10 ms, 4 s, ISR) + 6 s margin` — margin 150% от datasheet-худшего W_flash (практика k ≥ 1.5–2; IEC 60730-1 Class B: открытое окно ≥ 50% периода — удовлетворено).
-- **Роль**: backstop (INV-WATCHDOG-ARMED), не первичный safety-путь — первичный путь арбитражная цепочка C1 (ms-класс). IWDG — простой watchdog с независимым тактированием без временного окна ⇒ Low DC (IEC 61508-2 Table A.10) — приемлемо для backstop-роли; перенос детекции на watchdog не бюджетируется.
-- **Аппаратный факт** (datasheet-derived, #45 §7.1): LSI 17/32/47 kHz ⇒ аппаратный timeout 22.3–61.7 s (worst при 17 kHz); reload-каденция — нормативное требование, аппаратный сброс — верхняя страховка.
-- **Reload**: execution core на каждой границе bounded шага и в idle-loop; в TX-wait циклах (V1-практика); **в update path обязателен reload между sector-erase** (2×4 s < 10 s, 3×4 s = 12 s > 10 s — три последовательных эрейза без reload сбрасывают IWDG).
-- **Validation**: измеренные `W_flash + T_step + T_isr + margin ≤ 10 s` (#54 #5). Превышение ⇒ пересмотр окна (G4, impact #45).
+- **Окно = 10 s** (Q5, V1 keep): `max(10 ms, 4 s, ISR) + margin` — номинальное конфигурационное окно; практика margin k ≥ 1.5–2 от худшего legal stall (IEC 60730-1 Class B: открытое окно ≥ 50% периода — удовлетворено).
+- **Аппаратный факт (datasheet + первоисточник кода, коррекция ревью #48)**: `IWatchdog.begin(10000000)` (stm32duino, LSI_VALUE=32000) вычисляет prescaler 128, reload 2499 (IWatchdog.cpp `set()`), т.е. номинал **10.0 s @32 kHz**; по допуску LSI 17/32/47 kHz аппаратный timeout конфигурации V1: **6.8 s @47 kHz … 18.8 s @17 kHz**. Диапазон 22.3–61.7 s (из #45 §7.1) относится к максимальной конфигурации IWDG (PR 256, RL 4095), не к конфигурации V1.
+- **Правило reload (бюджетировать на fast-конец 47 kHz, 6.8 s)**: reload на границе каждого bounded шага и в idle-loop; **reload обязателен между последовательными flash-операциями** — одиночное окно erase+program (≤ 4.013 s) < 6.8 s ✓ (запас 2.8 s), но два окна подряд (≈ 8 s) > 6.8 s ⇒ сброс до завершения второго. В TX-wait циклах reload сохраняется (V1-практика).
+- **Backstop-латентность (медленный конец 17 kHz)**: аппаратный сброс после starvation наступает через 6.8–18.8 s (не 10 s); детекция starvation не бюджетируется как первичный путь — первичный путь арбитражная цепочка C1 (ms-класс).
+- **Роль**: backstop (INV-WATCHDOG-ARMED). IWDG — простой watchdog с независимым тактированием без временного окна ⇒ Low DC (IEC 61508-2 Table A.10) — приемлемо для backstop-роли.
+- **Validation**: измеренные `W_flash + T_step + T_isr + margin ≤ 6.8 s` (fast-конец, #54 #5), не 10 s. Превышение ⇒ пересмотр (окно/аппаратная конфигурация, G4, impact #45).
 
 ## 4. Bounded step budget
 
@@ -71,7 +74,7 @@
 | Control TX (CAN 100/101) | 50 ms gate; ramp шаг 2 ед / ~35 ms | V1 keep (Q5) |
 | ToF round-robin | слот 8 ms, 4 сенсора ⇒ 32 ms per sensor; I2C 100 kHz | BMS-quiet 17 ms (12 ms DE + 5 ms guard) |
 | AS5600 | 250 ms service; stale 1 s (пред-аллоцировано #43) | — |
-| BMS | 1 / 5 / 15 / 60 / 5 s (startup/idle/active/high-load/low-batt); DE 12 ms; RX timeout 140 ms | T_bms_stale = 60 s (Q3) |
+| BMS | 1 / 5 / 15 / 60 / 5 s (startup/idle/active/high-load/low-batt); DE 12 ms; RX timeout 140 ms | T_bms_stale = 120 s (Q3) |
 | Radio | backoff 5/30/120/600 s; silence probe 15 s; audit 300 s; AUX 20 ms; RSSI fresh 10 s | stationary+idle |
 | Telemetry (default подписки) | 300 ms; sensors 500 ms; stats 5 s; link health 5 s | V3: subscription-driven; defaults при подписке |
 | Startup grace | 1 s; Ready ≤ 5 s (Q7) | INV-STARTUP-GATE |
@@ -82,7 +85,7 @@ MTU = **128 B** (V1 keep, оба профиля). Бюджеты фиксиро�
 
 | Очередь | Глубина | Overload (#43/#47) |
 | --- | --- | --- |
-| Control (in) | 16 фреймов | reject на admission (явный код) |
+| Control (in) | 18 фреймов (**16 рабочих + 2 резервных** для stop/handshake, #43 §6 «Safety/control — резерв ёмкости»; stop-intents никогда не отклоняются, #45 §4) | reject на admission (кроме резерва) |
 | Service (in) | 8 | reject на admission |
 | Update (in) | 4 (резерв 2 при in-progress) | pause; reject только новые транзакции |
 | telemetry (out) | 8 | drop-oldest (свежесть) |
@@ -92,8 +95,8 @@ MTU = **128 B** (V1 keep, оба профиля). Бюджеты фиксиро�
 
 - Каждый drop/reject ⇒ счётчик (Observability Producer) + событие (#43).
 - **authorityId budget = 16** concurrent principals на effective `network_bridge` (Q5); исчерпание ⇒ `BusyRejected` (#47 §5.1 п.5).
-- RAM-стоимость очередей: ~14 KB суммарно (worst 16×128 B + 3×32×128 B + …) — в пределах бюджета RAM (раздел 8).
-- Sizing-основание: burst = handshake + N principals × pending (Control 16 ≥ 16 authority-держателей × 1); events/logs 32 = ~1.5–2× типовой поток диагностики за 10 s (практика); telemetry 8 = 2.7 s при 300 ms каденции.
+- RAM-стоимость очередей: ~14 KB суммарно (worst 18×128 B + 3×32×128 B + …) — в пределах бюджета RAM (раздел 8).
+- Sizing-основание: burst = handshake + N principals × pending (Control 18 ≥ 16 authority-держателей × 1 + 2 резерв); events/logs 32 = ~1.5–2× типовой поток диагностики за 10 s (практика); telemetry 8 = 2.4 s при 300 ms каденции.
 - Validation: #54 #7 (переполнения под load, счётчики наблюдаемы), #10 (high-water).
 
 ## 7. Адаптерные бюджеты (per-tick, Q5)
@@ -107,14 +110,14 @@ MTU = **128 B** (V1 keep, оба профиля). Бюджеты фиксиро�
 | UART BMS (9600) | ≤ 10 B/тик | baud-derived; транзакция по контракту BMS |
 | I2C | 1 ToF-чтение / 8 ms слот; AS5600 / 250 ms; BMS-quiet guard | V1 keep; recovery ≤ 16 SCL + cooldown ≥ 5 s |
 | Flash | W_flash ≤ 4 s (datasheet); save = 128 word-program + 1 B инвалидация + `delay(1000)` V1-класс | quiescence C6; RAM-exec развилка по измерению #54 |
-| Update (network_bridge) | ≥ 100 KB/s staging (230400 ⇒ ~1.8 MTU/тик); reload watchdog между sector-erase | Q5; W_apply измеряется (#50/#54) |
+| Update (network_bridge) | **≥ 12.8 KB/s net** (≥ 1 MTU/тик; линк-предел 230400 baud = 23.04 KB/s gross ≈ 1.8 MTU/тик; ACK/корреляция делит эффективную скорость); reload watchdog между flash-операциями | Q5 + коррекция ревью; W_apply измеряется (#50/#54) |
 
 - Блокирующий TX запрещён (DMA-TX или producer-budget, #43); доказательство неблокирующего TX — #54 #12.
 - Бюджеты адаптеров — вход proving slice #54 (обязательства #4, #13–#15).
 
 ## 8. Ресурсы MCU (Q6)
 
-- **CPU ≤ 70%** worst-case (measured; Liu & Layland RM-граница 69.3%; практика NASA GSFC late-stage); целевой типичный уровень ≤ 50%. Jitter ≤ 1 bounded step.
+- **CPU ≤ 70%** worst-case (measured). Примечание: RM-граница 69.3% (Liu & Layland 1973) формально применима к вытесняющему rate-monotonic планированию периодических задач; для cooperative scheduler (bounded steps, без вытеснения) она — ориентир практики, а не доказуемая граница — планируемость аргументируется bounded steps + измеренной нагрузкой (#54 #10; практика NASA GSFC late-stage: util ≤ ~70%). Целевой типичный уровень ≤ 50%. Jitter ≤ 1 bounded step.
 - **RAM ≤ 70%** статической памяти (margin ≥ 30%); **zero heap после init** (V1: Arduino `String` в калибровке — запрещено в critical paths; R04).
 - **Stack**: watermark (Keil AN316) + **25% headroom** + worst-case ISR nesting (ZVEI 20–25%; ≥ 200 B запас NuttX).
 - **Flash**: journal sector 7, 128 KB (V1 keep); application image budget **≤ 512 KB** (ограничение для slot/staging-дизайна #50); W_apply — измерение.
@@ -131,10 +134,10 @@ MTU = **128 B** (V1 keep, оба профиля). Бюджеты фиксиро�
 | ID | Решение |
 | --- | --- |
 | Q1 | D_accept = 1.0 м; правило вилки C1b: снижение maxSpeed при пустом интервале, расширение — только с геометрическим обоснованием |
-| Q2 | T_deg = 60 s непрерывного Degraded ⇒ Fault/stop; новый fault-код в #47 |
-| Q3 | T_bms_stale = 60 s (вместо V1 300 s); HZ-17 warning-семантика без изменений |
+| Q2 | T_deg = 60 s непрерывного motion-capable Degraded (HZ-05/06/16) ⇒ Fault/stop; carve-outs HZ-13/14/15/17; новый fault-код в #47 |
+| Q3 | T_bms_stale = 120 s (коррекция ревью: исходные 60 s = каденции high-load без запаса); HZ-17 warning-семантика без изменений |
 | Q4 | ATEMP warn 90 °C / fault 110 °C, гистерезис 5 °C; residual HZ-16: запас 15 °C до max junction 125 °C — принят владельцем |
-| Q5 | Технический пакет: watchdog 10 s; T_step 10 ms; control TX 50 ms; MTU 128 B; очереди 16/8/4 и 8/32/32/16; authority 16; CAN RX/TX 64/16; UART 230/57/10 B/тик; update ≥ 100 KB/s |
+| Q5 | Технический пакет: watchdog 10 s; T_step 10 ms; control TX 50 ms; MTU 128 B; очереди 18/8/4 (Control 16+2 резерв) и 8/32/32/16; authority 16; CAN RX/TX 64/16; UART 230/57/10 B/тик; update ≥ 12.8 KB/s net (линк 23 KB/s) |
 | Q6 | CPU ≤ 70% / RAM ≤ 70% / stack +25% / zero heap post-init |
 | Q7 | Startup: Ready ≤ 5 s |
 | Q8 | Availability ≥ 99.5% |
