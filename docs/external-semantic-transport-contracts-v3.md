@@ -125,22 +125,34 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - `controllerEpoch`;
 - `firmwareIdentity` (type/build id opaque);
 - `supportedCapabilities` (bitmask/set);
-- profile-relevant limit flags (без обязательных чисел budgets — они в #48, могут advertise как opaque limit class later).
+- profile-relevant limit flags (без обязательных чисел budgets — они в #48, могут advertise как opaque limit class later);
+- assigned `authorityId` + **granted** role set / capability grant for this principal (controller-authored).
 
-**Client → controller (bind):**
+**Client → controller (hello / interest):**
 
 - `profileId` (`network_bridge` | `radio`);
-- claimed roles interest / `clientCapabilities`;
-- `clientIdentity` binding material → выдаваемый/подтверждаемый `authorityId` (не shared-secret crypto session).
+- optional `endpointInstanceHint` (non-authoritative label for logs; **не** identity proof);
+- **requested** roles interest / `clientCapabilities` (заявки, не права).
+
+**Назначение principal / `authorityId` (channel-trust, без authenticated session на wire контроллера):**
+
+- `authorityId` **всегда назначает контроллер**. Клиент не выбирает и не доказывает себе `authorityId` материалом на wire.
+- Источник binding в core v3:
+  - `radio` — provisioned identity канала/endpoint profile (radio path → principal по provisioning/profile policy);
+  - `network_bridge` — provisioned identity **моста / bridge-presented endpoint**. Если bridge мультиплексирует несколько TCP/UI клиентов, **аутентификация этих клиентов — на стороне bridge**; контроллер видит уже разведённые provisioned principals и каждому выдаёт свой `authorityId`.
+- Заявленные client role/capability fields — только **requests**. Контроллер отвечает **grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports**. Попытка действовать вне grant → `Unauthorized` / `RoleEscalation`.
+- Отсутствие crypto session на wire **не** означает self-asserted authority: claimed-role escalation без grant отвергается contract tests.
 
 **Правила:**
 
 - major mismatch → hard fail handshake;
-- unknown **optional** capability → ignore;
-- required capability missing → reject with stable code;
-- capabilities **не** заменяют authority admission;
-- N principals concurrent на `network_bridge` допустимы; exclusive control slot всё равно один (#46);
-- idempotency ledger keyed per `authorityId`.
+- unknown **optional** capability в request → ignore;
+- required capability missing у controller → reject with stable code;
+- capabilities **не** заменяют authority admission и **не** расширяют grant;
+- N principals concurrent на `network_bridge` допустимы (через bridge-presented endpoints); exclusive control slot всё равно один (#46);
+- idempotency ledger keyed per controller-assigned `authorityId`;
+- после handshake client обязан echo назначенный `authorityId` и **role из grant** в mutating requests; role вне grant или чужой `authorityId` → reject.
+
 
 ### 5.2 Evolution
 
@@ -150,17 +162,19 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 
 ## 6. Security boundaries (Q5)
 
-Threat model core v3: **channel-trust by deployment** (локальный bridge UART/TCP в site trust, own radio link). Clients считаются операционно доверенными, но **не** снимают admission.
+Threat model core v3: **channel-trust by deployment** (локальный bridge UART/TCP в site trust, own radio link). Операционное доверие к deployment-каналу **не** равно self-issued privileges на wire.
 
 | Mechanism | Protects | Does **not** provide |
 |---|---|---|
 | `frameChecksum` | accidental corruption | authenticity vs active peer, anti-spoof |
-| Authority role + `authorityId` + admission | unauthorized operation class / unprovisioned surface | confidential channel |
-| Capability gates + profile hard rules | Update-class only on network_bridge; feature surface | proof of human operator |
-| OTA image checksum + signature fields | authenticity/integrity **of image bytes** | authorization to begin/abort/pause update transaction (Update Authority + admission) |
+| Controller-assigned `authorityId` + **granted** roles + admission | operation class / unprovisioned surface; claimed-role escalation | cryptographic proof of human operator; hostile-link anti-spoof beyond channel trust |
+| Capability gates + profile hard rules | Update-class only on network_bridge; feature surface | rights beyond grant |
+| OTA image checksum + signature fields | authenticity/integrity **of image bytes** | authorization to begin/abort/pause update transaction (Update Authority + admission + grant) |
 | Transport MAC/TLS | — | **not in core v3**; future capability/profile extension |
+| Bridge-side client auth (outside controller wire) | who may become a bridge-presented principal | end-to-end crypto to controller |
 
-Explicit non-claims: no hostile-RF confidentiality, no mutual auth crypto session in core.
+Explicit non-claims: no hostile-RF confidentiality, no mutual auth crypto session on controller wire in core.
+
 
 ## 7. Message taxonomy (Q11)
 
@@ -203,7 +217,8 @@ Force-stop на CAN **вне** этих очередей и **вне** client pr
 
 Mutating operation request payload minimum:
 
-- `requestId`, `controllerEpoch`, `authority` role, `authorityId`, `operationType`, `parameters` (typed; empty object allowed), conditional `parentOperationId` (not used by external clients for child creation under normal rules).
+- `requestId`, `controllerEpoch`, `authority` role (**must be ∈ handshake grant**), `authorityId` (**controller-assigned; echo only**), `operationType`, `parameters` (typed; empty object allowed), conditional `parentOperationId` (not used by external clients for child creation under normal rules).
+
 
 Positive admission ACK minimum:
 
@@ -309,6 +324,7 @@ Minimum set (extensible):
 - `EpochMismatch`
 - `HandshakeRequired`
 - `Unauthorized`
+- `RoleEscalation` (claimed role/capability outside controller grant)
 - `UnsupportedVersion`
 - `UnknownCapabilityRequired`
 - `InvalidEnvelope`
@@ -354,7 +370,10 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 9. `SetWallClock` does not move monotonic timers (property test).  
 10. Multi-principal: two authorities query ok; second exclusive activity → `ResourceConflict`.  
 11. No hidden semantics checklist (G3 item): external client with registries+schema alone can decode admissions, outcomes, faults.  
-12. Authority mismatch endpoint≠role tests.
+12. Authority binding: `authorityId` is controller-assigned; client cannot pick another principal's id.  
+13. **Impersonation / claimed-role escalation:** request with role or capability outside handshake grant → `RoleEscalation`/`Unauthorized`; endpoint/profile alone never implies Update Authority without grant.  
+14. Bridge multiplexing model test: two bridge-presented principals get distinct `authorityId` and separate idempotency keys.
+
 
 Численные stress bounds — #48; HIL — verification pyramid #52.
 
@@ -380,7 +399,7 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 | Q7 | Hard link/budgets; soft interest via capabilities |
 | Q8 | Mutating Update only on `network_bridge` |
 | Q9 | Dual-plane correlation |
-| Q10 | Bidirectional handshake + client capabilities |
+| Q10 | Bidirectional handshake; client interest only; controller assigns authorityId + grant |
 | Q11 | Families by exchange class |
 | Q12 | Explicit queueClass + #43 policies |
 | Q13 | Session-scoped lease stream |
@@ -389,7 +408,7 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 | Q16 | Layered stable registries |
 | Q17 | Per-link FIFO per class |
 | Q18 | Split transport vs semantic timers |
-| Q19 | Principal from handshake; role+authorityId on requests |
+| Q19 | Controller-assigned authorityId; requests echo grant role+id; no self-binding identity |
 | Q20 | protocolVersion + capabilities evolution |
 | Q21 | #47 schemas; #50 data model/flows |
 | Q22 | Query + bounded sub + optional streams |
