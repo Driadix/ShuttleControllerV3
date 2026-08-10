@@ -63,7 +63,9 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 - framing wrapper (например E22 `{addh,addl,channel}` перед core frame на radio; raw core frame на network_bridge UART);
 - MTU / bytes-per-tick / depth budgets (числа — #48);
 - link detection / RX frame timeout hooks;
-- **mutating Update-class допускается только на `network_bridge`**.
+- **effective profile** определяется контроллером по **ingress adapter / provisioned endpoint**, не по client field;
+- **mutating Update-class допускается только когда effective profile = `network_bridge`**.
+
 
 **Soft (capabilities ∩ authority, не hard allowlist message family):**
 
@@ -124,22 +126,32 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - `protocolVersion` (major.minor.patch wire encoding);
 - `controllerEpoch`;
 - `firmwareIdentity` (type/build id opaque);
+- `effectiveProfileId` (controller-derived from ingress; authoritative);
 - `supportedCapabilities` (bitmask/set);
 - profile-relevant limit flags (без обязательных чисел budgets — они в #48, могут advertise как opaque limit class later);
 - assigned `authorityId` + **granted** role set / capability grant for this principal (controller-authored).
 
+
 **Client → controller (hello / interest):**
 
-- `profileId` (`network_bridge` | `radio`);
+- `expectedProfileId` (`network_bridge` | `radio`) — **неавторитетное** ожидание клиента для fail-fast mismatch; **не** выбирает effective profile;
 - optional `endpointInstanceHint` (non-authoritative label for logs; **не** identity proof);
 - **requested** roles interest / `clientCapabilities` (заявки, не права).
+
+**Effective profile (anti-spoof):**
+
+- Контроллер выводит `effectiveProfileId` **только** из ingress path: какой transport adapter / UART / provisioned endpoint принял кадр (radio adapter vs network_bridge adapter), плюс provisioning binding этого endpoint.
+- Client **не** может повысить привилегии, отправив `expectedProfileId=network_bridge` на radio ingress.
+- Если client прислал `expectedProfileId` и оно ≠ `effectiveProfileId` → handshake/request reject `ProfileMismatch` (стабильный код).
+- Controller advertise в handshake/ACK включает `effectiveProfileId`, который client обязан учитывать.
+- Все hard profile rules (Update-class, budgets, framing expectations) применяются к **effective** profile.
 
 **Назначение principal / `authorityId` (channel-trust, без authenticated session на wire контроллера):**
 
 - `authorityId` **всегда назначает контроллер**. Клиент не выбирает и не доказывает себе `authorityId` материалом на wire.
 - Источник binding в core v3:
-  - `radio` — provisioned identity канала/endpoint profile (radio path → principal по provisioning/profile policy);
-  - `network_bridge` — provisioned identity **моста / bridge-presented endpoint**. Если bridge мультиплексирует несколько TCP/UI клиентов, **аутентификация этих клиентов — на стороне bridge**; контроллер видит уже разведённые provisioned principals и каждому выдаёт свой `authorityId`.
+  - effective `radio` — provisioned identity канала/endpoint profile (radio path → principal по provisioning/profile policy);
+  - effective `network_bridge` — provisioned identity **моста / bridge-presented endpoint**. Если bridge мультиплексирует несколько TCP/UI клиентов, **аутентификация этих клиентов — на стороне bridge**; контроллер видит уже разведённые provisioned principals и каждому выдаёт свой `authorityId`.
 - Заявленные client role/capability fields — только **requests**. Контроллер отвечает **grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports**. Попытка действовать вне grant → `Unauthorized` / `RoleEscalation`.
 - Отсутствие crypto session на wire **не** означает self-asserted authority: claimed-role escalation без grant отвергается contract tests.
 
@@ -149,9 +161,10 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - unknown **optional** capability в request → ignore;
 - required capability missing у controller → reject with stable code;
 - capabilities **не** заменяют authority admission и **не** расширяют grant;
-- N principals concurrent на `network_bridge` допустимы (через bridge-presented endpoints); exclusive control slot всё равно один (#46);
+- N principals concurrent на effective `network_bridge` допустимы (через bridge-presented endpoints); exclusive control slot всё равно один (#46);
 - idempotency ledger keyed per controller-assigned `authorityId`;
 - после handshake client обязан echo назначенный `authorityId` и **role из grant** в mutating requests; role вне grant или чужой `authorityId` → reject.
+
 
 
 ### 5.2 Evolution
@@ -168,7 +181,7 @@ Threat model core v3: **channel-trust by deployment** (локальный bridge
 |---|---|---|
 | `frameChecksum` | accidental corruption | authenticity vs active peer, anti-spoof |
 | Controller-assigned `authorityId` + **granted** roles + admission | operation class / unprovisioned surface; claimed-role escalation | cryptographic proof of human operator; hostile-link anti-spoof beyond channel trust |
-| Capability gates + profile hard rules | Update-class only on network_bridge; feature surface | rights beyond grant |
+| Capability gates + **effective** profile hard rules | Update-class only on effective network_bridge; feature surface; profile spoof rejected | rights beyond grant / claimed profileId |
 | OTA image checksum + signature fields | authenticity/integrity **of image bytes** | authorization to begin/abort/pause update transaction (Update Authority + admission + grant) |
 | Transport MAC/TLS | — | **not in core v3**; future capability/profile extension |
 | Bridge-side client auth (outside controller wire) | who may become a bridge-presented principal | end-to-end crypto to controller |
@@ -334,7 +347,8 @@ Minimum set (extensible):
 - `WrongWindow`
 - `HealthGate`
 - `ProvisioningGate`
-- `ProfileDenied` (e.g. Update on radio)
+- `ProfileDenied` (e.g. Update on effective radio)
+- `ProfileMismatch` (client `expectedProfileId` ≠ controller `effectiveProfileId`)
 - `SequenceStale`
 - `BusyRejected` (class full)  
   (plus type-precondition codes as catalog evolves)
@@ -365,14 +379,15 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 4. Dual-plane correlation: retry same `requestId`; `frameSeq` reuse does not create new logical request.  
 5. Negative ACK never carries `operationId`.  
 6. Queue class overload: reject vs drop-oldest vs drop-newest behaviors + counters.  
-7. Update mutating denied on radio (`ProfileDenied`).  
+7. Update mutating denied on **effective** radio (`ProfileDenied`) even if payload claims otherwise.  
 8. Session stale `sessionSeq` does not refresh lease.  
 9. `SetWallClock` does not move monotonic timers (property test).  
 10. Multi-principal: two authorities query ok; second exclusive activity → `ResourceConflict`.  
 11. No hidden semantics checklist (G3 item): external client with registries+schema alone can decode admissions, outcomes, faults.  
 12. Authority binding: `authorityId` is controller-assigned; client cannot pick another principal's id.  
 13. **Impersonation / claimed-role escalation:** request with role or capability outside handshake grant → `RoleEscalation`/`Unauthorized`; endpoint/profile alone never implies Update Authority without grant.  
-14. Bridge multiplexing model test: two bridge-presented principals get distinct `authorityId` and separate idempotency keys.
+14. Bridge multiplexing model test: two bridge-presented principals get distinct `authorityId` and separate idempotency keys.  
+15. **Profile spoofing:** frame on radio ingress with `expectedProfileId=network_bridge` → `ProfileMismatch` / no network_bridge privileges; UpdateBegin on radio ingress → `ProfileDenied` regardless of claimed expected profile.
 
 
 Численные stress bounds — #48; HIL — verification pyramid #52.
@@ -393,13 +408,13 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 |---|---|
 | Q1 | Shared contract core + transport profiles |
 | Q2 | Canonical binary framing + typed payloads |
-| Q3/Q6 | Profiles: `network_bridge` + `radio` only (no `display`) |
+| Q3/Q6 | Profiles: `network_bridge` + `radio` only (no `display`); effective profile from ingress |
 | Q4 | Mandatory handshake before mutating |
 | Q5 | Channel-trust + role authz; checksum ≠ authenticity; OTA sig ≠ transaction authz |
 | Q7 | Hard link/budgets; soft interest via capabilities |
-| Q8 | Mutating Update only on `network_bridge` |
+| Q8 | Mutating Update only on effective `network_bridge` |
 | Q9 | Dual-plane correlation |
-| Q10 | Bidirectional handshake; client interest only; controller assigns authorityId + grant |
+| Q10 | Bidirectional handshake; expectedProfileId non-authoritative; controller assigns authorityId + grant |
 | Q11 | Families by exchange class |
 | Q12 | Explicit queueClass + #43 policies |
 | Q13 | Session-scoped lease stream |
