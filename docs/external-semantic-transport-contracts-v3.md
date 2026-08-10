@@ -102,7 +102,6 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 | `authorityId` | u16 | controller-assigned at handshake; payload echo only — never sole resolver of principal |
 | `bridgePrincipalHandle` | u16 | bridge-asserted on **every** principal-scoped frame on effective `network_bridge`; maps to authorityId |
 | `sessionId` | u16 | manual session instance |
-
 | `sessionSeq` | u16 | monotonic per session |
 | `frameSeq` | u8 или u16 | per-link transport; profile table |
 
