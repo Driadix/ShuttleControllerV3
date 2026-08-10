@@ -99,9 +99,10 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 | `controllerEpoch` | u32 | opaque boot-instance; controller-authored |
 | `requestId` | u32 | unique per `(controllerEpoch, authorityId)` logical request |
 | `operationId` | u32 | controller-authored after accept; never client-supplied as identity |
-| `authorityId` | u16 | controller-assigned at handshake |
-| `bridgePrincipalHandle` | u16 | bridge-asserted; authoritative only on effective `network_bridge` hello; maps to authorityId |
+| `authorityId` | u16 | controller-assigned at handshake; payload echo only — never sole resolver of principal |
+| `bridgePrincipalHandle` | u16 | bridge-asserted on **every** principal-scoped frame on effective `network_bridge`; maps to authorityId |
 | `sessionId` | u16 | manual session instance |
+
 | `sessionSeq` | u16 | monotonic per session |
 | `frameSeq` | u8 или u16 | per-link transport; profile table |
 
@@ -151,16 +152,25 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 **Назначение principal / `authorityId` (channel-trust, без crypto session на wire контроллера):**
 
 - `authorityId` **всегда назначает контроллер**. Клиент конечного UI **не** self-binds identity.
-- **effective `radio`:** ровно **один** principal на radio ingress/endpoint. Поле `bridgePrincipalHandle` **запрещено** (присутствует → `InvalidEnvelope` / `Unauthorized`). `authorityId` = controller map(radio endpoint).
+- **Resolver principal (норматив):** контроллер **никогда** не выбирает principal только по payload `authorityId`.  
+  - effective `radio` → principal = map(radio ingress/endpoint);  
+  - effective `network_bridge` → principal = map(bridgeEndpointId, bridgePrincipalHandle) на **каждом** principal-scoped кадре.
+
+- **effective `radio`:** ровно **один** principal на radio ingress/endpoint. Поле `bridgePrincipalHandle` **запрещено** (присутствует → `InvalidEnvelope` / `Unauthorized`).
 - **effective `network_bridge` — multi-principal через bridge-asserted handle:**
   1. Физически у контроллера один bridge ingress; multiplex downstream TCP/UI клиентов делает **provisioned bridge** (доверенный peer channel-trust), не контроллер.
-  2. Bridge **обязан** ставить на hello (и при смене downstream client) поле **`bridgePrincipalHandle`** (u16): opaque handle, который bridge ассоциирует 1:1 с одним своим authenticated/authorized downstream client.
-  3. Поле авторитетно **только** потому что кадр пришёл на effective `network_bridge` ingress от provisioned bridge. Это **не** credential конечного пользователя и **не** доступно как self-assert на radio.
-  4. Контроллер отображает `(bridgeEndpointId, bridgePrincipalHandle) → authorityId` (таблица/bounded map). Новый handle: allocate `authorityId` если budget principals на bridge не исчерпан; иначе reject `BusyRejected` / `Unauthorized`. Повтор hello с тем же handle в том же epoch → тот же `authorityId` (re-bind grant).
-  5. После handshake mutating messages echo **`authorityId`** (controller-assigned). Повторная передача handle на каждом кадре не требуется; смена handle без нового handshake не переключает principal mid-flight.
-  6. `endpointInstanceHint` **никогда** не участвует в map → authorityId.
-- Заявленные client role/capability fields — только **requests**. Контроллер отвечает **grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports**. Попытка действовать вне grant → `Unauthorized` / `RoleEscalation`.
-- Отсутствие crypto session на wire **не** означает self-asserted authority: claimed-role escalation без grant отвергается contract tests.
+  2. Bridge **обязан** на hello и на **каждом** последующем principal-scoped кадре (mutating Control/Service/Update/Session, handshake refresh) ставить **`bridgePrincipalHandle`** (u16) в transport/header envelope (не «только payload по желанию клиента»).
+  3. Handle opaque; bridge ассоциирует 1:1 с одним своим authenticated/authorized downstream client. Поле авторитетно **только** потому что кадр пришёл на effective `network_bridge` ingress от provisioned bridge. **Не** credential конечного пользователя; **не** действительно на radio.
+  4. Hello: controller map `(bridgeEndpointId, bridgePrincipalHandle) → authorityId` (+ grant). Новый handle → allocate `authorityId` если budget не исчерпан; иначе reject. Повтор hello с тем же handle в epoch → тот же `authorityId`.
+  5. **Post-handshake invariant (anti cross-principal spoof):**
+     - Controller resolves `resolvedAuthorityId = map(bridgeEndpoint, handle)` from the frame handle.
+     - Unknown/unmapped handle → reject `Unauthorized` / `HandshakeRequired`.
+     - Payload may **echo** `authorityId` for client correlation; if present and `≠ resolvedAuthorityId` → reject `Unauthorized` (client A cannot act as client B by stuffing B's id).
+     - Controller admission, idempotency ledger, grants use **resolvedAuthorityId only**.
+  6. **Bridge obligation:** for each downstream connection the bridge MUST (a) fix one handle for that connection after its auth, (b) stamp that handle on every principal-scoped frame to the controller, (c) **rewrite or drop** any client-supplied attempt to present another connection's `authorityId`/handle before forwarding. Failure of (b)/(c) is a bridge defect; controller still enforces (5).
+  7. Смена handle = смена principal (нужен handshake/grant для нового handle). `endpointInstanceHint` **никогда** не участвует в map.
+- Заявленные role/capability fields — только **requests**. Grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports. Вне grant → `Unauthorized` / `RoleEscalation`.
+- Отсутствие crypto session на wire **не** означает self-asserted authority.
 
 **Правила:**
 
@@ -168,10 +178,11 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - unknown **optional** capability в request → ignore;
 - required capability missing у controller → reject with stable code;
 - capabilities **не** заменяют authority admission и **не** расширяют grant;
-- N concurrent `authorityId` на effective `network_bridge` допустимы через различные `bridgePrincipalHandle`; exclusive control slot всё равно один (#46);
-- idempotency ledger keyed per controller-assigned `authorityId`;
-- после handshake client/bridge обязан echo назначенный `authorityId` и **role из grant** в mutating requests; role вне grant или чужой `authorityId` → reject;
-- radio path, предъявивший `bridgePrincipalHandle`, или bridge path без handle на hello → reject.
+- N concurrent `authorityId` на effective `network_bridge` через различные handles; exclusive control slot один (#46);
+- idempotency ledger keyed per **resolved** `authorityId`;
+- role в payload должна быть ∈ grant **resolved** principal;
+- radio path с `bridgePrincipalHandle`, или bridge principal-scoped frame без handle → reject.
+
 
 
 
@@ -395,9 +406,9 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 9. `SetWallClock` does not move monotonic timers (property test).  
 10. Multi-principal on bridge: two different `bridgePrincipalHandle` values on effective network_bridge get distinct `authorityId` and separate idempotency ledgers; second exclusive activity → `ResourceConflict`.  
 11. No hidden semantics checklist (G3 item): external client with registries+schema alone can decode admissions, outcomes, faults.  
-12. Authority binding: `authorityId` is controller-assigned; client cannot pick another principal's id.  
+12. Authority binding: principal resolved from ingress (+ handle on bridge), never from client-chosen `authorityId` alone; payload id is echo; mismatch with resolved → `Unauthorized`.  
 13. **Impersonation / claimed-role escalation:** request with role or capability outside handshake grant → `RoleEscalation`/`Unauthorized`; endpoint/profile alone never implies Update Authority without grant.  
-14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) `bridgePrincipalHandle` on radio ingress → reject; (e) missing handle on bridge hello → reject.  
+14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) handle on radio → reject; (e) missing handle on bridge hello or principal-scoped frame → reject; (f) **cross-principal spoof:** after handshakes for A and B, frame with handle=A but payload authorityId=B → reject; frame with handle=B stamped by bridge for connection A must not be producible if bridge enforces bind — controller still rejects unknown handle/grant mismatch.  
 15. **Profile spoofing:** frame on radio ingress with `expectedProfileId=network_bridge` → `ProfileMismatch` / no network_bridge privileges; UpdateBegin on radio ingress → `ProfileDenied` regardless of claimed expected profile.
 
 
