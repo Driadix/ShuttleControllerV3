@@ -1,4 +1,7 @@
-<!-- markdownlint-disable MD013 MD060 -->
+<!-- markdownlint-disable MD013 MD060 MD024 MD036 -->
+<!--
+MD024/MD036: намеренная повторяющаяся таксономия subsections («Entry points и call sites», «Admission/preconditions» и т.д.) одинакова для всех 13 operations и оформлена жирными маркерами; документ прошёл независимый checklist-review в этой форме (issue 14). Структура сохраняется как утверждённый evidence asset.
+-->
 
 # Capability Evidence Slices каталога операций V3 (V1 production evidence bundle)
 
@@ -10,6 +13,7 @@
 - **Version**: bundle revision `8dd3d0c` -> `70d78ec` (ветка `research/v3-capability-evidence-slices`, перенесена в пакет issue 53); независимый checklist-review по gate `legacy evidence ready` пройден, 5 minor-правок anchors внесены, блокирующих замечаний нет.
 - **Confidence**: факты разделены по классам `configured`/`inferred` в тексте; measured worst-case bounds не заявляются (см. `v1-execution-evidence`); disposition `preserve/change/exclude/unknown` - предложения, не норматив до verification gate владельца.
 - **Trace model (issue 5/12)**: при построении репозиторной схемы пакета (вариант B, issue 12) разделы bundle станут источником `EVD` Trace Records с типизированными ID; физический формат записей остаётся validation obligation схемы, здесь не предвосхищается.
+- **Retention obligation (commit-pinned links)**: ссылки на системный индекс (`a7f927c`) и execution evidence (`22b8990`) указывают на коммиты, живущие только на исследовательских ветках `research/v1-system-evidence` и `research/v1-execution-evidence`. До удаления этих веток их содержимое должно быть промоутнуто в `main` (естественное продолжение issues 11/44) либо коммиты закреплены durable ref-ом; иначе pinned-ссылки станут 404 и нарушат provenance-требование issue 5.
 
 ## Research snapshot
 
@@ -88,7 +92,6 @@ Shared primitives, описанные в bundle отдельными разде�
 
 ## Группа: MoveDistance + LiftTo и motion/lifter примитивы
 
-
 Источник: `C:/Projects/Shuttle/ShuttleController` (локальное зеркало). Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4a226e5` отличается только `docs/Controller-Nonblocking-Refactoring-Plan.md` (не используется). Все anchors ниже прочитаны и сверены с working tree. Файлы: `Cntrl_V2/Cntrl_V2.ino` (далее `.ino`), `Cntrl_V2/ShuttleProtocol.h` (далее `SP.h`), `Cntrl_V2/AlertManager.h`, `Cntrl_V2/TofHealthMonitor.h/.cpp`.
 
 Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/currentOperation, motor_Force_Stop, ToF freshness gate, bumper IRQ/handlePendingCrash) считаются установленными; здесь фиксируется только их локальное применение в scope.
@@ -100,6 +103,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 1. MoveDistance (CMD_MOVE_DIST_F = 0x13, CMD_MOVE_DIST_R = 0x12)
 
 #### Entry points и call sites
+
 - Константы команд: `SP.h:99-100` (`CMD_MOVE_DIST_R = 0x12`, `CMD_MOVE_DIST_F = 0x13`, комментарий "Requires MSG_CMD_WITH_ARG"); `MSG_CMD_WITH_ARG = 0x31` (`SP.h:62`), пакет `ParamCmdPacket { int32_t arg; uint8_t cmdType; }` (`SP.h:367-371`).
 - В supported-списке: `isSupportedCommand` (`.ino:8351-8384`), обе команды на строках 8364-8365. Хелпер `isManualDistanceCommand` (`.ino:8391-8394`).
 - Dispatch-путь (автономный): SystemYield опрашивает UART'ы (`pollSerial(SerialDisplay...)` `.ino:6950`, `pollSerial(SerialLora...)` `.ino:6954`) → `processPacket` (`.ino:2713`) → ветка `MSG_CMD_SIMPLE || MSG_CMD_WITH_ARG` (`.ino:2777`) → возврат `reqCmd` (`.ino:2872`) → `status = cmdRad` (`.ino:6987`) или `status = cmdDisp` (`.ino:7018`) → `loop()` case `CoreOpMode::IDLE` (`.ino:1824-1896`) → `currentMode = CoreOpMode::AUTO_EXEC` (`.ino:1867-1871`) → `run_Cmd()` (`.ino:1900`) → ветки `CMD_MOVE_DIST_R` (`.ino:3284-3290`) / `CMD_MOVE_DIST_F` (`.ino:3291-3297`): `send_Cmd(); moove_Distance_X(mooveDistance); status = CMD_STOP; send_Cmd();`.
@@ -108,7 +112,9 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Косвенно: `get_Distance` (`.ino:3857-3919`), `readAs5600AngleForMotion` (`.ino:1052-1068`), `motor_Start_Forward` (`.ino:2239-2247`) / `motor_Start_Reverse` (`.ino:2250-2258`), `motor_Speed` (`.ino:2088-2236`), `motor_Stop` (`.ino:2261-2334`), `set_Position` (`.ino:3922-4034`), `blink_Work` (`.ino:4051` и далее), `lifter_Down` (`.ino:2453-2521`, только в fault-пути), `preserveManualStopOnAbort` (`.ino:8585-8591`), `ensureChannelTofReadyForMotion` (`.ino:3536-3553`, через motor_Start_*), `SystemYield` (`.ino:6839-7058`), `shouldAbortLoop` (`.ino:8598-8601`).
 
 #### Admission/preconditions
+
 Все проверки в `processPacket`, ветка MSG_CMD (`.ino:2777-2884`), в порядке исполнения:
+
 1. `isSupportedCommand(reqCmd)` (`.ino:2782`) → иначе `ACK_REJECTED` (`.ino:2784`).
 2. Provisioning: `!isProvisionedShuttle() && !isUnprovisionedCommandAllowed(reqCmd)` (`.ino:2819`) → `ACK_BAD_ENVIRONMENT` (`.ino:2826`); для distance-команд логируется `Manual reject cmd=%02X reason=not_prov` (`.ino:2820-2825`). `isUnprovisionedCommandAllowed` = только STOP/STOP_MANUAL/SYSTEM_RESET/RESET_ERROR (`.ino:8406-8409`).
 3. `isErrorActive() && !isOverrideCommand(reqCmd)` (`.ino:2832`) → `ACK_ERROR_STATE` (`.ino:2839`).
@@ -120,6 +126,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 Дополнительные пред-условия внутри самой операции: `distance[1] >= 70` для F (`.ino:4806`) / `distance[0] >= 70` для R (`.ino:5007`); успешное чтение AS5600 (`readAs5600AngleForMotion`, `.ino:4813-4816` / `.ino:5014-5017`); ToF freshness gate в `motor_Start_Forward/Reverse` (`.ino:2241-2244` / `.ino:2252-2255`), bypass при `sensorOff` (`.ino:3538-3541`).
 
 #### Шаги и переходы (normal path, F; R - зеркально с slot 0)
+
 1. `get_Distance()` (`.ino:4805`); gate `distance[1] < 70` → `LOG_WARN "End of channel F, can't moove..."` и return без движения (`.ino:4806-4809`).
 2. `LOG_INFO "Moove F distance = %d Pos = %d"` (`.ino:4811`); чтение стартового угла AS5600 `readAs5600AngleForMotion(&startAngle)` (`.ino:4813`); при неудаче - latch `FAULT_AS5600` (через `latchAs5600Fault("motion_read", ...)` в `.ino:1052-1068`) и return.
 3. Клампизация параметров: `maxSpeed < 2 → 2` (`.ino:4820-4821`); `minSpeed > maxSpeed → maxSpeed-1` (`.ino:4822-4823`, ДО dist-cap'ов - см. Unknowns/ordering); dist-капы: `(500,1000]→50`, `(300,500]→30`, `<=300→20` (`.ino:4824-4829`); редукция дистанции: `dist>500 → -50`, `dist>50 → -10` (`.ino:4830-4833`).
@@ -141,6 +148,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 Выходы из цикла: (а) `dist <= 0` (доехали); (б) конец канала `distance[slot] <= 90+chnlOffset`; (в) abort (stop/ошибка); (г) AS5600 read fail; (д) no-progress timeout; (е) lifted near-target escape. Общего deadline у операции нет.
 
 #### Stop/fault/abort
+
 - CMD_STOP/CMD_STOP_MANUAL, пришедшие во время движения, обрабатываются в `SystemYield` (вызывается в каждой итерации цикла операции): статус выставляется в `.ino:6962-6974` (включая немедленный `motor_Stop()` в самом SystemYield), далее цикл операции видит `shouldAbortLoop()` → `preserveManualStopOnAbort()` (сохраняет CMD_STOP_MANUAL, иначе ставит CMD_STOP, `.ino:8585-8591`) + `motor_Stop()` + return.
 - Fault во время исполнения: любой active fault делает `shouldAbortLoop()` истинным (через `isErrorActive()`, `.ino:8593-8596`) → тот же abort-путь. `FAULT_MOVE_TIMEOUT` выставляется сама операция (`.ino:4984`/`.ino:5184`), после чего принудительно опускает лифт `lifter_Down()` (`.ino:4986`/`.ino:5186`).
 - Отказ AS5600: read fail в тике → `motor_Stop(); status = CMD_STOP; return` (`.ino:4853-4856`); read fail на старте → latch FAULT_AS5600 и тихий return (`.ino:4813-4816`).
@@ -149,6 +157,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Пути с SystemYield: каждый оборот `while (moove)` и каждый accel/decel-шаг `motor_Speed`. Пути без SystemYield: `motor_Stop` (блокирующие `delay()`, `.ino:2289-2294`, `.ino:2307-2326`), `delay(5)` в IDLE-приёмке (`.ino:1830-1832`).
 
 #### Observable outcomes
+
 - Успех: `status = CMD_STOP` (run_Cmd, `.ino:3288`), `currentOperation` → `STATE_IDLE`, `currentMode` → IDLE (`.ino:1902-1907`); финальный `send_Cmd()`; `LOG_DEBUG "End mooving, position = %d"` (`.ino:4993`).
 - Ручная сессия: по успеху `status = CMD_MANUAL_MODE`, `currentOperation = STATE_MANUAL`, `LOG_INFO "Manual step done -> ready"`, `send_Cmd()` (`.ino:1940-1946`); при abort - только `LOG_WARN "Manual step abort status=%02X"` (`.ino:1950`).
 - Telemetry state при приёмке: `STATE_MOVE_FWD = 13` / `STATE_MOVE_REV = 14` через `mapCmdToOperation` (`.ino:8251-8254`; значения `SP.h:160-161`).
@@ -158,6 +167,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Побочные эффекты на глобальные переменные: F-конец канала - `currentPosition = 0` (`.ino:4950`); R-конец канала - `channelLength = currentPosition + shuttleLength` (`.ino:5152`).
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | 50 ms | `.ino:4849`, `.ino:5050` | configured | период управляющего тика (позиция/скорость) в цикле операции |
@@ -172,6 +182,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | 2000 (единиц угла) | `.ino:4864-4935` | configured | порог различения wrap-направлений в интеграции угла |
 
 #### Resource effects
+
 - CAN ID 100 (extended, len 4): команды скорости движения; big-endian int32 = скорость * 1000 (`.ino:2096-2121`; `cracked_int_t` union int/bytes `.ino:464-469`); Can1 500 kbit/s, extended frames (`.ino:1735-1737`). Знак: `hexSpeed.vint = -hexSpeed.vint` при `motorReverse ^ inverse` (`.ino:2114-2115`).
 - I2C1-устройства: TOF-сенсоры (через `get_Distance`/`TOF_Inquire_I2C_Decoding_ByID`, `.ino:3887`) и AS5600 (`as5600Sensor.readAngle`, `.ino:1057`).
 - UART: `send_Cmd()` (телеметрия/ACK) до и после операции (`.ino:3285-3289`); дренаж command-портов в SystemYield на каждом обороте.
@@ -179,18 +190,22 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Flash: не пишется. Delays: `delay(5)`x2 в IDLE-приёмке (`.ino:1830-1832`); блокирующие delay в `motor_Stop` (`.ino:2289-2294`, `.ino:2307-2326`).
 
 #### Профильные варианты 800/1000/1200
+
 В самом MoveDistance профильных ветвлений нет. `shuttleLength` (default 1000, `.ino:598`) участвует косвенно:
+
 - R-конец канала: `channelLength = currentPosition + shuttleLength` (`.ino:5152`);
 - `set_Position`: нижняя граница `channelLength >= currentPosition + shuttleLength` (`.ino:4032-4033`).
 Задание: `CFG_SHUTTLE_LEN` без валидации диапазона (`.ino:2948-2953`), full-config `shuttleLen` (`.ino:3049-3050`), EEPROM load (`.ino:7631`). Сравнения `shuttleLength == 800/1000/1200` в scope операции отсутствуют (встречаются в unload/compact-путях вне scope, напр. `.ino:5383-5385`).
 
 #### Unknowns
+
 - Физическая размерность аргумента dist: из source следует мм-подобная (пороги 70/90/30, капы), но явно не документирована; коэффициент 15 не выводим из source.
 - Поведение при `arg <= 0`: `dist<=0` → выход по `moove=0` на первом же тике (после wrapper-`motor_Stop`); при отрицательном `arg` - wrap в большое uint16 (truncation `.ino:2861`, валидации нет) - фактическое поведение при arg > 65535/отрицательном не специфицировано.
 - Калибровочные массивы `calibrateEncoder_F/R` (default {40..40}, `.ino:569-574`) - как заполняются в production, в scope не устанавливается.
 - Почему именно `dist < 30` и 3000 ms для lifted-escape - не устанавливается.
 
 #### Disposition proposals (предложения, не решения)
+
 - V1-факт: аргумент trunc-ится int32→uint16 без валидации (`.ino:2861`, `.ino:596`). Предложение: change - валидировать диапазон и отвергать ACK_REJECTED. Обоснование: отрицательные/сверхбольшие значения дают неопределённое поведение операции.
 - V1-факт: no-progress timeout 5000 ms → FAULT_MOVE_TIMEOUT + принудительный `lifter_Down()` (`.ino:4982-4988`). Предложение: preserve концепцию таймаута; change - автоматическое опускание лифта в fault-пути требует отдельного решения (операция смены состояния платформы как побочный эффект fault).
 - V1-факт: lifted near-target escape 3000 ms без fault (`.ino:4977-4980`). Предложение: change/exclude - тихое допущение может маскировать упор в препятствие с грузом.
@@ -205,6 +220,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 2. LiftTo (CMD_LIFT_UP = 0x14, CMD_LIFT_DOWN = 0x15)
 
 #### Entry points и call sites
+
 - Константы: `SP.h:101-102`. Supported-список: `.ino:8366-8367`; хелпер `isLiftCommand` (`.ino:8401-8404`).
 - Dispatch автономный: тот же parsing-путь, что у MoveDistance; `canAcceptCommandNow` для lift: `currentMode == MANUAL || (currentMode == IDLE && isShuttleIdle())` (`.ino:8452-8455`). Lift-команды exempt из in-channel проверки (`isOutOfChannelExemptCommand`, `.ino:8411-8416`) - подъём/опускание разрешены вне канала.
 - `run_Cmd`: `CMD_LIFT_UP` (`.ino:3244-3250`): `send_Cmd(); lifter_Up(); status = CMD_STOP; send_Cmd()`; `CMD_LIFT_DOWN` (`.ino:3251-3257`) зеркально.
@@ -213,10 +229,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Другие вызывающие lifter_Up/lifter_Down (контекст, вне scope): load/unload/long/compact/demo-операции (`.ino:3268, 3276, 3352, 3363, 3378, 5206, 5277, 5339, 5479-5553, 5643-5670, 5859-5930, 6006, 6142, 6243, 6448, 6545, 6696, 7726` и др.); fault-путь MoveDistance (`.ino:4986, 5186`).
 
 #### Admission/preconditions
+
 Пункты 1-5, 7 из admission MoveDistance идентичны (supported/provisioning/error/channel/busy/ACK_OK), с отличиями: lift не требует in-channel (exempt), busy-правило строже (только MANUAL или IDLE+stopped). Аргументов нет (MSG_CMD_SIMPLE достаточно; `MSG_CMD_WITH_ARG` тоже принимается - arg игнорируется, `.ino:2857-2864`).
 Физические пред-условия: концевики `DL_UP` (PC13) / `DL_DOWN` (PB4), INPUT_PULLUP (`.ino:355-356`, `.ino:1683-1684`); активное состояние - LOW. Ранние выходы: `lifter_Up` при `!DL_UP && DL_DOWN` (уже вверху, `.ino:2363-2367`), `lifter_Down` при `!DL_DOWN && DL_UP` (`.ino:2455-2458`) - только LOG_DEBUG, без stats/ACK-изменений.
 
 #### Шаги и переходы (lifter_Up; lifter_Down зеркально по знаку)
+
 1. `LOG_INFO "Moove lifter up..."` (`.ino:2368`); CAN-сообщение: `id = 101`, `len = 4` (`.ino:2374-2375`).
 2. Ramp: `for (j = 5; j < 50; j += 5)` - 9 шагов (`.ino:2376`), скорость `-j * 1000` (`.ino:2377-2378`), запись в CAN (`.ino:2384`), ожидание 30 ms на шаг: `while (millis() - cnt < 30) { SystemYield(); if (shouldAbortLoop()) { preserveManualStopOnAbort(); return; } }` (`.ino:2385-2393`).
 3. Полная скорость `-50000` (`.ino:2397`); запись, если DL_UP не активен (`.ino:2402-2403`).
@@ -226,6 +244,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 7. lifter_Down: ramp `+j*1000` (`.ino:2465-2482`), полная `+50000` (`.ino:2486`), цикл `while (digitalRead(DL_DOWN))` (`.ino:2493`), timeout аналогичен (`.ino:2501-2508`); эпилог: `lifterUp = 0` (`.ino:2515-2516`), `lifter_Stop()`, `load = 0`, `lifterCurrent = 0` (`.ino:2517-2519`), `liftDownCounter++` (`.ino:2520`). Дополнительной записи полной скорости после цикла нет (асимметрия с Up).
 
 #### Stop/fault/abort
+
 - CMD_STOP/CMD_STOP_MANUAL: `shouldAbortLoop()` проверяется в каждом 30 ms шаге ramp и каждом обороте основного цикла (`.ino:2388`, `.ino:2407`, `.ino:2477` (down ramp), `.ino:2496`); abort → `preserveManualStopOnAbort(); return` - лифт остаётся в промежуточном положении, `lifter_Stop()` НЕ вызывается в abort-пути (только preserve+return).
 - Fault во время исполнения: любой active fault → `shouldAbortLoop()` → тот же выход. `FAULT_LIFTER_TIMEOUT` latch-ится самой функцией по `lifterDelay` (`.ino:2415`/`.ino:2504`, `SP.h:179`, бит 1<<9), после неё `status = CMD_STOP`, `break` → эпилог выполняется (включая возможную установку `lifterUp = 1`, см. Unknowns).
 - Отказ сенсоров: концевики не опрашиваются на отказ; ToF-сенсоры опрашиваются (`get_Distance` в цикле) и способны latch-ить ToF-fault → abort через `shouldAbortLoop`.
@@ -233,6 +252,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Переход в ERROR: fault, выставленный в операции, перехватывается в начале следующего прохода `loop()`: `if (isErrorActive()) currentMode = CoreOpMode::ERROR` (`.ino:1819-1820`); ERROR-case принудительно останавливает движение `motor_Force_Stop()` если не stationary (`.ino:2050-2056`) и обрабатывает только CMD_SYSTEM_RESET/CMD_RESET_ERROR/CMD_SAVE_EEPROM (`.ino:2060-2074`).
 
 #### Observable outcomes
+
 - Успех Up: `lifterUp = 1` (если DL_DOWN не активен), `liftUpCounter++`, при `lifterCurrent > 500` - `lifterOverloadCount++`; статус в run_Cmd → `CMD_STOP` (`.ino:3248`), далее IDLE (`.ino:1902-1907`). Успех Down: `lifterUp = 0`, `load = 0`, `lifterCurrent = 0`, `liftDownCounter++`.
 - Telemetry state при приёмке: `STATE_LIFT_UP = 15` / `STATE_LIFT_DOWN = 16` (`mapCmdToOperation` `.ino:8255-8258`, `SP.h:162-163`).
 - Fault: `FAULT_LIFTER_TIMEOUT` (`.ino:2415`/`.ino:2504`) → ERROR на следующем проходе loop; `LOG_ERROR "Lifter timeout!"`.
@@ -241,6 +261,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - `lifterUp` влияет на последующее движение: мягкий разгон/торможение в `motor_Speed` (`.ino:2123-2126`, `.ino:2176-2177`), 3000 ms escape в moove_Distance (`.ino:4977`/`.ino:5177`), спец-кейсы `motor_Stop` для unload (`.ino:2288-2294`, `.ino:2305-2316`).
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | 9 шагов ramp (j=5..45, шаг 5) | `.ino:2376`, `.ino:2465` | configured | разгон лифтера до полной скорости |
@@ -251,6 +272,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | порог перегрузки 500 | `.ino:2443` | configured | единицы raw CAN 2405; физический смысл из source не устанавливается |
 
 #### Resource effects
+
 - CAN ID 101 (extended, len 4): скорость лифтера, big-endian int32 (`.ino:2374-2383`); значения: ramp ±j*1000, полная ±50000, стоп 0 (`lifter_Stop` `.ino:2524-2536`).
 - CAN ID 2405 (RX): ток лифтера, `buf[4]*256+buf[5]` (`.ino:2427-2429`) - только при подъёме.
 - GPIO: DL_UP PC13, DL_DOWN PB4 (INPUT_PULLUP, `.ino:355-356`, `.ino:1683-1684`); CHANNEL не используется.
@@ -259,9 +281,11 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Delays: `delay(10)` в основном цикле (`.ino:2420`, `.ino:2509`); SystemYield в каждом ожидании.
 
 #### Профильные варианты 800/1000/1200
+
 В lifter_Up/lifter_Down профильных ветвлений нет. Config `lifter_Speed = 3700` (`.ino:1645`, сохраняется/читается EEPROM `.ino:7594`/`.ino:7628`) в логике лифтера НЕ используется (скорости захардкожены ±50000 и ramp 5..45) - мёртвый config.
 
 #### Unknowns
+
 - Физические единицы тока CAN 2405 и порога 500; единицы скорости лифтера (±50000).
 - Поведение `summCurrent /= k` (`.ino:2442`) при k==0: возможно, если оба концевика одновременно активны (ранний выход не срабатывает, т.к. условие требует ровно одного) и цикл `while (DL_UP)` не executes; последствия деления на 0 на целевой платформе из source не устанавливаются.
 - После timeout эпилог может выставить `lifterUp = 1` (`.ino:2439-2440`), если DL_DOWN не активен, хотя платформа в промежуточном положении - факт зафиксирован, замысел не устанавливается.
@@ -269,6 +293,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Почему abort-путь не вызывает `lifter_Stop()` (лифт продолжает получать последний кадр скорости до watchdog/CAN-таймаута привода - поведение привода из source не устанавливается).
 
 #### Disposition proposals (предложения, не решения)
+
 - V1-факт: концевики как единственный источник завершения хода + timeout 3800 ms → FAULT_LIFTER_TIMEOUT (`.ino:2404-2419`). Предложение: preserve концепцию.
 - V1-факт: abort не вызывает lifter_Stop (`.ino:2388-2391`, `.ino:2407-2411`). Предложение: change - явная остановка привода при abort.
 - V1-факт: `lifterUp` может стать 1 после timeout (`.ino:2439-2440`). Предложение: change - не менять флаг состояния при fault.
@@ -283,6 +308,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 3. Примитивы движения
 
 #### motor_Speed(int spd) (CAN ID 100) - `.ino:2088-2236`
+
 - No-op, если `motorReverse == 2` (движение не активно) или прошло < 50 ms с последней записи (`countMoove`, `.ino:2090-2092`); дренаж CAN RX (`.ino:2093`).
 - Rate-limit: при `spd >= 10 && spd - oldSpeed >= 10` → `spd = oldSpeed + 10` (`.ino:2099-2100`); кап 100 (`.ino:2101-2102`).
 - Разгон (`spd > oldSpeed`, `.ino:2105-2152`): `steps = (spd - oldSpeed)/2`; на шаге: `blink_Work()`, `get_Distance()`, интерполированная скорость `minSpeed + oldSpeed*maxSpeed/100 + (spd-oldSpeed)*i*maxSpeed/(steps*100)` (`.ino:2111`), знак по `motorReverse ^ inverse`, `*1000`, CAN id=100, `set_Position()`; ожидание `accel` ms: при `lifterUp && i in (2,40]` → `80 - i*15/10`, иначе 35 (`.ino:2123-2127`); внутри ожидания `SystemYield()`, `blink_Work()`, `get_Distance()`, `shouldAbortLoop()` → preserve + `motor_Stop()` + return (`.ino:2128-2137`). Финальная точная запись скорости, `oldSpeed = spd` (`.ino:2139-2152`).
@@ -292,11 +318,13 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Вызывающие: moove_Distance_F/R (тики скорости), moove_Forward/Reverse, moove_Right/Left, stop_Before_Pallete_*, unload-пути.
 
 #### motor_Start_Forward / motor_Start_Reverse (направление, "motor_Reverse") - `.ino:2239-2247`, `.ino:2250-2258`
+
 - ToF freshness gate: `ensureChannelTofReadyForMotion(forward, "start_f"/"start_r")` (`.ino:2241`, `.ino:2252`; определение `.ino:3536-3553`): slot 1 (forward) / slot 0 (reverse) → `tofSensorForDistanceSlot` (`.ino:3483-3503`, inverse меняет сенсоры местами) → `tofHealth[sensor].measurementReady(now)` (TofHealthMonitor: outputValid + полное окно 16 выборок, `kFreshFrameTimeoutMs = 300 ms`, `TofHealthMonitor.h:41-52`, `.cpp:203-211`); при провале - `latchTofMeasurementFault` (`.ino:3505-3534`, fault TOF_CH_F/TOF_CH_R) и возврат БЕЗ установки флагов. Bypass при `sensorOff` (`.ino:3538-3541`).
 - Успех: `motorStart = 1; motorReverse = 0/1`.
 - Вызывающие: moove_Distance_F (`.ino:4834`), moove_Distance_R (`.ino:5035`), moove_Forward (`.ino:5200`), moove_Reverse (`.ino:5271`), moove_Left/Right (`.ino:6633`/`.ino:6564`), unload-пути.
 
 #### motor_Stop() - `.ino:2261-2334` (управляемый останов)
+
 - No-op при `motorReverse == 2` (`.ino:2263-2264`); `LOG_INFO "Motor stop, speed = %d"` (`.ino:2266`).
 - Ramp вниз от `oldSpeed`: `maxi = oldSpeed/2`, цикл `i = maxi..1` с убывающей скоростью (`.ino:2271-2294`); задержки: `delay(10)` в unload+lifted-кейсе (`status == CMD_LONG_UNLOAD || CMD_UNLOAD && lifterUp && distance[3]+100 < distance[1]`, `.ino:2288-2289`), иначе `maxi > 10 → delay(10 + i*20/maxi)`, иначе `delay(50)` (`.ino:2290-2294`).
 - Нулевой кадр + повторные нулевые кадры: 10 раз по 100 ms в unload+lifted-кейсе, иначе 1 раз 100 ms (`.ino:2296-2327`).
@@ -304,10 +332,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Блокирующие `delay()` без SystemYield (кроме возможного входа через `blink_Work`); вызывается из всех операций движения, из SystemYield при CMD_STOP (`.ino:6973`), из motor_Speed при abort.
 
 #### motor_Force_Stop() - `.ino:2337-2355` (экстренный останов)
+
 - Один нулевой кадр CAN ID 100 без ramp и логов; сброс тех же флагов (`.ino:2351-2354`).
 - Вызывающие: ERROR-case loop при не-stationary (`.ino:2053-2056`), `enforceActiveMotionTofSafety` (`.ino:3570`), handlePendingCrash (bumper, `.ino:7798` и далее - cross-cutting).
 
 #### moove_Forward() - `.ino:5197-5265` (движение вперёд до конца канала)
+
 - `motor_Start_Forward()` (`.ino:5200`); `detect_Pallete()` (`.ino:5201`); при `lifterUp` → `stop_Before_Pallete_F()` (`.ino:4292` и далее) + `lifter_Down()` + return (`.ino:5202-5208`) - с грузом едет до паллета и опускает платформу.
 - Цикл `while (moove)` БЕЗ общего deadline: `SystemYield`, abort → preserve+motor_Stop+return, `blink_Work`, `get_Distance`, тик 50 ms (`.ino:5224`): `set_Position`, `detect_Pallete`, clamp `currentPosition >= 0`; профиль скорости: `distance[1] >= 1500 → 100`; `> 90+chnlOffset → distance[1]/20` с ограничениями (не выше oldSpeed при oldSpeed>5, пол 5, кап 80, не выше oldSpeed при oldSpeed>50) (`.ino:5231-5245`); `<= 90+chnlOffset`: для LOAD/LONG_LOAD и distance>80 → скорость 5, иначе стоп: `speed=0, moove=0, currentPosition=60`, LOG_INFO "End of channel" (`.ino:5246-5256`); `motor_Speed(speed)`; повторный abort-check (`.ino:5259-5260`).
 - Выходы: конец канала (distance[1] <= 90+chnlOffset), abort (stop/ошибка). Выхода по obstacle внутри самого цикла нет - только через ToF force-stop (fault) или bumper (cross-cutting).
@@ -315,6 +345,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Вызывающие (в scope): run_Cmd для CMD_MOVE_RIGHT_MAN (`.ino:3240`), CMD_UNLOAD (`.ino:3277`, `.ino:3280`), CMD_CALIBRATE (`.ino:3304`), CMD_COUNT_PALLETS (`.ino:3321`), CMD_COMPACT_F/R (`.ino:3336`, `.ino:3346`), CMD_LONG_LOAD (`.ino:3355`), CMD_LONG_UNLOAD (`.ino:3364`, `.ino:3370`), CMD_LONG_UNLOAD_QTY (`.ino:3379`, `.ino:3387`), CMD_HOME (`.ino:3393`); плюс операции вне scope (single_Load, long_Load, demo и др.).
 
 #### moove_Reverse() - `.ino:5268-5326` (движение назад до конца канала)
+
 - Зеркален moove_Forward: slot `distance[0]`, `motor_Start_Reverse()` (`.ino:5271`), lifted-ветка через `stop_Before_Pallete_R()` (`.ino:4518` и далее, `.ino:5273-5278`).
 - Тик: `millis() - count > timingBudget + 5` (`.ino:5295`), `timingBudget = 40` default (`.ino:1649`, сохраняется/читается EEPROM `.ino:7595`/`.ino:7629`) - т.е. 45 ms против 50 ms у Forward; происхождение "+5" из source не устанавливается.
 - Конец канала: `channelLength = currentPosition + shuttleLength + distance[0] - 30`, `endOfChannel = 1` (`.ino:5308-5317`); профиль скорости как у Forward без капа 80 и без LOAD-исключения (`.ino:5298-5307`).
@@ -322,6 +353,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Вызывающие (в scope): run_Cmd для CMD_MOVE_LEFT_MAN (`.ino:3233`); вне scope: demo_Mode (`.ino:6697`), calibrate (`.ino:7363` через moove_Distance_R(2000) - фактически дистанционный вариант).
 
 #### lifter_Stop() - `.ino:2524-2536`
+
 - Один нулевой кадр CAN ID 101; вызывается из lifter_Up/Down (норма и timeout).
 
 ---
@@ -329,6 +361,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 4. Ручные непрерывные движения (контекст shared primitives)
 
 #### CMD_MOVE_RIGHT_MAN = 0x10 / CMD_MOVE_LEFT_MAN = 0x11 (`SP.h:97-98`)
+
 - V1 manual session, не root operation: исполняются в case MANUAL через `moove_Right()` (`.ino:6559-6624`, фактически REVERSE-hold - `motor_Start_Reverse`, лог "Manual reverse hold") и `moove_Left()` (`.ino:6627-6690`, фактически FORWARD-hold - `motor_Start_Forward`, лог "Manual forward hold"); имена функций инвертированы относительно направления.
 - Общие с MoveDistance примитивы: `motor_Start_*`, `motor_Speed`, `motor_Stop`, `get_Distance`, `set_Position`, `SystemYield`, `shouldAbortLoop`. Отличия: ramp `manualCount` 6→60 (+3 каждые 50 ms, `.ino:6590-6592`/`.ino:6656-6658`), ограничение скорости по `distance[slot]/25` (`.ino:6600-6604`), bypass при `sensorOff` (`.ino:6594`/`.ino:6660`), конец канала → `status = CMD_MANUAL_MODE` + `WARN_END_OF_CHANNEL` 3000 ms (`.ino:6606-6614`), выход при `status != CMD_MOVE_X_MAN` (`.ino:6580-6585`) - управление удержанием кнопки; radio-hold watchdog 3000 ms в SystemYield (`.ino:7041-7051`, `kManualRadioHoldWatchdogMs` `.ino:395`).
 - В run_Cmd тоже есть ветки MOVE_LEFT_MAN/RIGHT_MAN (`.ino:3230-3243`) - путь AUTO_EXEC (например, при CMD_UNLOAD `status = CMD_MOVE_RIGHT_MAN` выставляется программно, `.ino:3279`).
@@ -365,7 +398,6 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 
 ## Группа: LoadPallet / UnloadPallet
 
-
 Источник: локальное зеркало `C:/Projects/Shuttle/ShuttleController`. Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d` (проверено: HEAD `4a226e5` отличается только `docs/Controller-Nonblocking-Refactoring-Plan.md`, diff = 1914 строк добавлено, исходники идентичны). Номера строк - по working tree. Файлы: `Cntrl_V2/Cntrl_V2.ino` (9063 строки), `Cntrl_V2/ShuttleProtocol.h` (612 строк).
 
 Уточнение к тиkету: в реальном файле `unload_Pallete()` занимает L5329-L5659, `load_Pallete()` - L5662-L5939, `single_Load()` - L5942-L6000 (порядок и границы отличаются от подсказок тикета; все anchors ниже выверены по содержимому).
@@ -376,9 +408,10 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 
 ---
 
-#### LoadPallet (CMD_LOAD = 0x20)
+### LoadPallet (CMD_LOAD = 0x20)
 
 **Entry points и call sites**
+
 - Объявление команды: `Cntrl_V2/ShuttleProtocol.h:L106`. Supported-список: `Cntrl_V2/Cntrl_V2.ino:L8369`. Маппинг в STATE_LOAD: `Cntrl_V2/Cntrl_V2.ino:L8233-L8234`.
 - Авто-путь: `loop()` IDLE -> AUTO_EXEC (`Cntrl_V2/Cntrl_V2.ino:L1870`) -> `run_Cmd()` (`Cntrl_V2/Cntrl_V2.ino:L1898-L1909`) -> ветвь CMD_LOAD `Cntrl_V2/Cntrl_V2.ino:L3265-L3272`: `send_Cmd()` -> `lifter_Down()` -> `single_Load()` -> `status = CMD_STOP` -> `send_Cmd()`. После `run_Cmd` обёртка AUTO_EXEC: `if (status != CMD_STOP) status = 0; currentOperation = STATE_IDLE; currentMode = IDLE` (`Cntrl_V2/Cntrl_V2.ino:L1902-L1907`).
 - Ручной путь: в `CoreOpMode::MANUAL` ветви `status == CMD_LOAD` (`Cntrl_V2/Cntrl_V2.ino:L1991-L1995`) и `status == CMD_UNLOAD` (`Cntrl_V2/Cntrl_V2.ino:L1996-L2000`) выставляют `currentOperation` и вызывают `run_Cmd()`. Достижимость: acceptance требует `isShuttleIdle()`, т.е. status==CMD_STOP/0 в момент приёма; в MANUAL это окно появляется, например, после abort ручного шага, когда `SystemYield` внутри той же итерации MANUAL-ветви принимает новую команду до перехода в IDLE (переход в IDLE по `status == CMD_STOP` - `Cntrl_V2/Cntrl_V2.ino:L2040-L2047` - происходит в конце итерации). (Суждение: окно узкое, но ветвь не мёртвая.)
@@ -387,12 +420,14 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Косвенные вызовы `load_Pallete` вне CMD_LOAD (контекст): `pallete_Compacting_F` (`Cntrl_V2/Cntrl_V2.ino:L6171`), `long_Load` (`Cntrl_V2/Cntrl_V2.ino:L6313`), demo (`Cntrl_V2/Cntrl_V2.ino:L6746`), evacuate-контекст (`Cntrl_V2/Cntrl_V2.ino:L6746` - demo; другие call sites по grep: 6171, 6313, 6746).
 
 **Admission/preconditions**
+
 - Полный протокольный admission - см. общий блок выше (source/target, supported, provisioning, error-state, inChannel, isShuttleIdle; ACK_REJECTED/BAD_ENVIRONMENT/ERROR_STATE/BUSY).
 - Специфических проверок аргументов нет (команда без аргумента).
 - Внутренние preconditions в `load_Pallete`: проверка «канал не забит» `if (lastPalletePosition && lastPalletePosition < shuttleLength * 2)` -> WARN_CHANNEL_FULL + CMD_STOP (`Cntrl_V2/Cntrl_V2.ino:L5671-L5677`). Факт: при свежем CMD_LOAD `lastPalletePosition` обнуляется в момент приёма команды (`Cntrl_V2/Cntrl_V2.ino:L1845`), поэтому для одиночной загрузки проверка всегда пропускается; она срабатывает только при повторных вызовах `load_Pallete` в compact/long/demo.
 - Проверка стартовой позиции: `!((detectPalleteF1 || detectPalleteF2 || detectPalleteR1 || detectPalleteR2) && distance[1] < 450 + chnlOffset && distance[3] > 400)` определяет, нужна ли фаза подхода (`Cntrl_V2/Cntrl_V2.ino:L5682-L5685`).
 
 **Шаги и переходы (normal path)**
+
 1. `run_Cmd`: `send_Cmd()` (телеметрия), `lifter_Down()` (`Cntrl_V2/Cntrl_V2.ino:L3267-L3268`).
 2. `single_Load`: `moove_Forward()` - движение к началу канала (`Cntrl_V2/Cntrl_V2.ino:L5944`); при `lifterUp` `moove_Forward` вместо движения к концу канала выполняет `stop_Before_Pallete_F()` + `lifter_Down()` и возвращает (`Cntrl_V2/Cntrl_V2.ino:L5202-L5208`); останов у начала канала по `distance[1] <= 90 + chnlOffset`, при CMD_LOAD в зоне `distance[1] > 80` - creep скоростью 5 вместо остановки (`Cntrl_V2/Cntrl_V2.ino:L5246-L5256`), `currentPosition = 60` при останове (`Cntrl_V2/Cntrl_V2.ino:L5254`). `shouldAbortLoop()` после `moove_Forward` -> return (`Cntrl_V2/Cntrl_V2.ino:L5945-L5946`).
 3. Опрос датчиков и выбор ветви (`Cntrl_V2/Cntrl_V2.ino:L5947-L5957`): (F1&&F2 && shuttleLength != 800) или (все 4 датчика) -> `load_Pallete()`; (F1&&F2 && shuttleLength == 800) -> WARN_PALLET_SIZE_ERROR (без остановки, без return); иначе - обратный поиск.
@@ -410,6 +445,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 Условия циклов и выходы зафиксированы в шагах; цикл поиска вперёд не имеет выхода по «паллета не найдена», кроме timeout `2000000/maxSpeed` и `distance[1] < 80` (`Cntrl_V2/Cntrl_V2.ino:L5802`).
 
 **Stop/fault/abort**
+
 - `shouldAbortLoop()` (`Cntrl_V2/Cntrl_V2.ino:L8598-L8601`) проверяется в голове всех циклов движения; в board-delay цикле и в `moove_Distance_*` перед стопом вызывается `preserveManualStopOnAbort()` (`Cntrl_V2/Cntrl_V2.ino:L8585-L8591`, вызовы `Cntrl_V2/Cntrl_V2.ino:L5754`, `Cntrl_V2/Cntrl_V2.ino:L5832`, `Cntrl_V2/Cntrl_V2.ino:L4843`, `Cntrl_V2/Cntrl_V2.ino:L5044`) - сохраняет CMD_STOP_MANUAL, иначе ставит CMD_STOP.
 - Обработчики abort в `load_Pallete` ставят `status = CMD_STOP` + `motor_Stop()` (`Cntrl_V2/Cntrl_V2.ino:L5711-L5716`, `Cntrl_V2/Cntrl_V2.ino:L5877-L5882`); в `single_Load`-поиске аналогично (`Cntrl_V2/Cntrl_V2.ino:L5964-L5969`). Warning-ветви (WARN_PALLET_SIZE_ERROR при 800) не останавливают операцию и не делают return - управление проваливается к финальному `moove_Forward()` (`Cntrl_V2/Cntrl_V2.ino:L5952-L5956`, `Cntrl_V2/Cntrl_V2.ino:L5999`).
 - Fault-пути лифтера: `lifter_Up`/`lifter_Down` по таймауту `lifterDelay` -> `lifter_Stop()` + `setFault(FAULT_LIFTER_TIMEOUT)` + `status = CMD_STOP` (`Cntrl_V2/Cntrl_V2.ino:L2412-L2419`, `Cntrl_V2/Cntrl_V2.ino:L2501-L2508`); abort внутри подъёма/опускания -> `preserveManualStopOnAbort()` + return без остановки движения (`Cntrl_V2/Cntrl_V2.ino:L2388-L2392`, `Cntrl_V2/Cntrl_V2.ino:L2407-L2411`, `Cntrl_V2/Cntrl_V2.ino:L2477-L2481`, `Cntrl_V2/Cntrl_V2.ino:L2496-L2500`).
@@ -420,6 +456,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - `SystemYield()` вызывается во всех циклах движения и в `lifter_*`; НЕ вызывается напрямую в `detect_Pallete` (блокирующие `delay(5)`, `Cntrl_V2/Cntrl_V2.ino:L3414-L3462`), в `delay(5)` повторного опроса recapture (`Cntrl_V2/Cntrl_V2.ino:L5903`), в рамповых `delay(...)` внутри `motor_Stop`/`motor_Speed` (`Cntrl_V2/Cntrl_V2.ino:L2289-L2327`; в `motor_Speed` рампа yield есть - `Cntrl_V2/Cntrl_V2.ino:L2129`, `Cntrl_V2/Cntrl_V2.ino:L2180`).
 
 **Observable outcomes**
+
 - Успех: паллета поднята, перевезена к концу канала (reverse), опущена; `lastPallete = 1`, `lastPalletePosition = currentPosition`; `sramStats->payload.loadCounter++` (`Cntrl_V2/Cntrl_V2.ino:L5938`), попутно `liftDownCounter++`/`liftUpCounter++` (`Cntrl_V2/Cntrl_V2.ino:L2520`, `Cntrl_V2/Cntrl_V2.ino:L2449`); финальный `moove_Forward()` к началу канала; `status = CMD_STOP`, `currentOperation` STATE_LOAD -> STATE_IDLE (`Cntrl_V2/Cntrl_V2.ino:L1906`), телеметрия на границах (`send_Cmd`).
 - Отказы: WARN_PALLET_SIZE_ERROR (`Cntrl_V2/Cntrl_V2.ino:L5955`, `Cntrl_V2/Cntrl_V2.ino:L5990`, `Cntrl_V2/Cntrl_V2.ino:L5780`), WARN_PALLET_NOT_FOUND (`Cntrl_V2/Cntrl_V2.ino:L5996`), WARN_OBSTACLE_AHEAD (`Cntrl_V2/Cntrl_V2.ino:L5807`, `Cntrl_V2/Cntrl_V2.ino:L5820`, `Cntrl_V2/Cntrl_V2.ino:L5847`), WARN_CHANNEL_FULL (`Cntrl_V2/Cntrl_V2.ino:L5674`) - все с таймаутом 5000 мс (`Cntrl_V2/Cntrl_V2.ino:L550-L553`); warning не прерывает приём новых команд и не является error.
 - Логи: "Start loading pallete..." (`Cntrl_V2/Cntrl_V2.ino:L5664`), "Single load fail..." (`Cntrl_V2/Cntrl_V2.ino:L5995`), "Last pallete position after load = %d" (`Cntrl_V2/Cntrl_V2.ino:L5936`).
@@ -448,6 +485,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | коррекция dist: -50 (>500 мм), -10 (>50 мм) | `Cntrl_V2/Cntrl_V2.ino:L4830-L4833`, `Cntrl_V2/Cntrl_V2.ino:L5027-L5030` | configured | упреждение торможения в moove_Distance_* |
 
 **Resource effects**
+
 - CAN: ID 100 - скорость/стоп привода движения (`Cntrl_V2/Cntrl_V2.ino:L2096`, `Cntrl_V2/Cntrl_V2.ino:L2267`); ID 101 - лифтер (`Cntrl_V2/Cntrl_V2.ino:L2374`, `Cntrl_V2/Cntrl_V2.ino:L2463`); ID 2405 - чтение тока лифтера только в `lifter_Up` (`Cntrl_V2/Cntrl_V2.ino:L2427-L2435`).
 - I2C: ToF - round-robin 4 сенсора с шагом >= 8 мс и паузой на BMS TX (`Cntrl_V2/Cntrl_V2.ino:L3861-L3871`); AS5600 углы в `set_Position`/`moove_Distance_*` (`Cntrl_V2/Cntrl_V2.ino:L3925`, `Cntrl_V2/Cntrl_V2.ino:L4813`).
 - GPIO: DATCHIK_F1/F2/R1/R2 (`Cntrl_V2/Cntrl_V2.ino:L3406-L3464`), концевики DL_UP/DL_DOWN (`Cntrl_V2/Cntrl_V2.ino:L2363`, `Cntrl_V2/Cntrl_V2.ino:L2455`), CHANNEL при admission (`Cntrl_V2/Cntrl_V2.ino:L2830`), LED через `blink_Work`/`blink_Warning`.
@@ -456,6 +494,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Блокирующие задержки без yield: `detect_Pallete` (`delay(5)`), `delay(5)` в recapture, рамповые delay в `motor_Stop`/`lifter_*`.
 
 **Профильные варианты 800/1000/1200**
+
 - pickup/board distance: 600 мм; 1200 -> 670 мм (`Cntrl_V2/Cntrl_V2.ino:L5724-L5726`); для 800 укорочение закомментировано (`Cntrl_V2/Cntrl_V2.ino:L5728`).
 - recapture: 1000 -> 250, 1200 -> 450, иначе 100 (`Cntrl_V2/Cntrl_V2.ino:L5864-L5868`).
 - board-delay: база `3 + (150-maxSpeed)/10`, для 1200 минус 3 шага (`Cntrl_V2/Cntrl_V2.ino:L5734-L5744`).
@@ -464,11 +503,13 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - -25 к доводке только для 1000/1200 (`Cntrl_V2/Cntrl_V2.ino:L4627-L4628`).
 
 **Unknowns**
+
 - Физический смысл и калибровка констант 600/670, 400, порога `distance[3] > 750`, множителя 0.96 - из source не устанавливается.
 - Реальные runtime-значения maxSpeed/shuttleLength/chnlOffset/mprOffset/interPalleteDistance берутся из EEPROM (default: maxSpeed=96 `Cntrl_V2/Cntrl_V2.ino:L591`, shuttleLength=1000 `Cntrl_V2/Cntrl_V2.ino:L598`, interPalleteDistance=100 `Cntrl_V2/Cntrl_V2.ino:L597`).
 - `int cnt = millis()` (`Cntrl_V2/Cntrl_V2.ino:L5707`) и глобальный `int count` (`Cntrl_V2/Cntrl_V2.ino:L586`): поведение после переполнения int32 (~24.8 сут аптайма) не специфицировано; паттерн сквозной.
 
 **Disposition proposals (только предложения)**
+
 - Preserve: структура «подход -> заезд под паллету по первой доске -> board-delay -> подъём -> recapture -> доставка -> опускание»; это наблюдаемое продуктовое поведение.
 - Preserve: профильные константы 600/670/500(unload), recapture 100/250/450, -25, требование обеих пар для 800 - как verified production behavior (anchors выше).
 - Change: timeout поиска `2000000/maxSpeed` - защита от maxSpeed==0 и невалидных значений (в V1 CFG_MAX_SPEED пишется без валидации, `Cntrl_V2/Cntrl_V2.ino:L2955-L2961`; деление на ноль на ARM - fault).
@@ -479,9 +520,10 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 
 ---
 
-#### UnloadPallet (CMD_UNLOAD = 0x21)
+### UnloadPallet (CMD_UNLOAD = 0x21)
 
 **Entry points и call sites**
+
 - Объявление: `Cntrl_V2/ShuttleProtocol.h:L107`. Supported: `Cntrl_V2/Cntrl_V2.ino:L8370`. Маппинг STATE_UNLOAD: `Cntrl_V2/Cntrl_V2.ino:L8235-L8236`.
 - Авто-путь: dispatch `Cntrl_V2/Cntrl_V2.ino:L3273-L3283`: `send_Cmd()` -> `lifter_Down()` -> `moove_Forward()` -> `unload_Pallete()` -> `status = CMD_MOVE_RIGHT_MAN` -> `moove_Forward()` -> `status = CMD_STOP` -> `send_Cmd()`.
 - Факт ordering: в ветви CMD_UNLOAD нет guard'а перед финальным `moove_Forward()`; у CMD_LONG_UNLOAD guard есть - `if ((status == CMD_STOP && distance[1] > 100) || isErrorActive()) return;` (`Cntrl_V2/Cntrl_V2.ino:L3367-L3368`, аналог для QTY `Cntrl_V2/Cntrl_V2.ino:L3384-L3385`). После abort внутри `unload_Pallete` (status=CMD_STOP без error) dispatch всё равно перезаписывает status=CMD_MOVE_RIGHT_MAN и выполняет движение к началу канала; при active error `moove_Forward` сразу выходит через `shouldAbortLoop` (`Cntrl_V2/Cntrl_V2.ino:L5216-L5221`).
@@ -490,10 +532,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Косвенные вызовы `unload_Pallete` вне CMD_UNLOAD: `pallete_Compacting_R` (`Cntrl_V2/Cntrl_V2.ino:L6218`), `long_Unload` (`Cntrl_V2/Cntrl_V2.ino:L6386`, `Cntrl_V2/Cntrl_V2.ino:L6479`), demo (`Cntrl_V2/Cntrl_V2.ino:L6795`).
 
 **Admission/preconditions**
+
 - Протокольный admission - общий блок выше (идентичен CMD_LOAD).
 - Внутренних preconditions-проверок у `unload_Pallete` нет (в отличие от `load_Pallete`); единственное условие входа в фазу подхода - `distance[2] > 750` (`Cntrl_V2/Cntrl_V2.ino:L5345-L5349`).
 
 **Шаги и переходы (normal path)**
+
 1. `run_Cmd`: `send_Cmd()`, `lifter_Down()`, `moove_Forward()` - подвод к началу канала/последней паллете (`Cntrl_V2/Cntrl_V2.ino:L3275-L3277`).
 2. Вход `unload_Pallete`: лог "Start unloading pallete..."; при `fifoLifo` - `fifoLifo_Inverse()` (инверсия направления, см. раздел FIFO/LIFO) (`Cntrl_V2/Cntrl_V2.ino:L5331-L5333`); `startDiff = 0`, `lifter_Down()`, `get_Distance()`; `startDiff = 20` при `distance[0] < 90 + chnlOffset` (`Cntrl_V2/Cntrl_V2.ino:L5338-L5342`).
 3. Подход: при `distance[2] > 750` - `moove_Before_Pallete_R()` (движение к концу канала до зоны паллеты, выход по `distance[2] < 1000` или `distance[0] <= 90 + chnlOffset`, `Cntrl_V2/Cntrl_V2.ino:L4653-L4784`); abort -> `oldSpeed = 0`, восстановление fifoLifo, return (`Cntrl_V2/Cntrl_V2.ino:L5350-L5356`).
@@ -511,6 +555,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 15. Возврат в dispatch: `status = CMD_MOVE_RIGHT_MAN`, `moove_Forward()` (движение к началу канала), `status = CMD_STOP`, `send_Cmd()` (`Cntrl_V2/Cntrl_V2.ino:L3279-L3282`).
 
 **Stop/fault/abort**
+
 - Все циклы имеют `shouldAbortLoop()` в голове; abort-ветви в основном ставят `status = CMD_STOP` + `motor_Stop()` + восстановление fifoLifo + return (`Cntrl_V2/Cntrl_V2.ino:L5367-L5374`, `Cntrl_V2/Cntrl_V2.ino:L5506-L5513`, `Cntrl_V2/Cntrl_V2.ino:L5564-L5571`, `Cntrl_V2/Cntrl_V2.ino:L5580-L5587`, `Cntrl_V2/Cntrl_V2.ino:L5594-L5601`); в board-delay - `preserveManualStopOnAbort()` БЕЗ принудительного CMD_STOP (`Cntrl_V2/Cntrl_V2.ino:L5410-L5415`).
 - Warning-выходы (пункты 7, 8, 10) не выставляют error: WARN_PALLET_SIZE_ERROR, WARN_OBSTACLE_AHEAD, WARN_PALLET_NOT_FOUND (все 5000 мс).
 - Factual: при CMD_STOP из warning-ветвей и из abort-ветвей dispatch CMD_UNLOAD всё равно выполняет `status = CMD_MOVE_RIGHT_MAN; moove_Forward()` (`Cntrl_V2/Cntrl_V2.ino:L3279-L3280`) - шаттл доезжает к началу канала, если нет active error (см. Entry points).
@@ -519,6 +564,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - `SystemYield` отсутствует напрямую: `detect_Pallete` debounce, `delay(5)` повторного опроса в recapture (`Cntrl_V2/Cntrl_V2.ino:L5536`), рамповые delay `motor_Stop`.
 
 **Observable outcomes**
+
 - Успех: паллета снята из глубины канала, поднята, доставлена к началу канала, опущена; шаттл в начале канала (`currentPosition = distance[1] - 30`, затем финальный `moove_Forward` -> `currentPosition = 60`); `unloadCounter++` (`Cntrl_V2/Cntrl_V2.ino:L5656`), `liftUpCounter++`/`liftDownCounter++`; `lastPallete`/`lastPalletePosition` только при наличии паллеты сзади (`pstn != 0`, `Cntrl_V2/Cntrl_V2.ino:L5644-L5651`); status=CMD_STOP; currentOperation STATE_UNLOAD -> STATE_IDLE.
 - Отказы: WARN_PALLET_SIZE_ERROR (`Cntrl_V2/Cntrl_V2.ino:L5437`), WARN_OBSTACLE_AHEAD (`Cntrl_V2/Cntrl_V2.ino:L5458`), WARN_PALLET_NOT_FOUND (`Cntrl_V2/Cntrl_V2.ino:L5481`); логи "Pallete error in BB..." (`Cntrl_V2/Cntrl_V2.ino:L5435`), "Pallete error..." (`Cntrl_V2/Cntrl_V2.ino:L5455`), "Pallete lenght = %d" (`Cntrl_V2/Cntrl_V2.ino:L5468`).
 - `palleteCount`/`palletePosition[]` не затрагиваются.
@@ -547,6 +593,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | lifterDelay = 3800 мс; debounce 5 мс; CAN-троттлинг 50 мс | `Cntrl_V2/Cntrl_V2.ino:L1646`, `Cntrl_V2/Cntrl_V2.ino:L3442-L3462`, `Cntrl_V2/Cntrl_V2.ino:L2090` | configured | как в LoadPallet |
 
 **Resource effects**
+
 - CAN: ID 100 привод, ID 101 лифтер, ID 2405 ток (в `lifter_Up`); расширенный цикл стоп-пакетов для UNLOAD (`Cntrl_V2/Cntrl_V2.ino:L2305-L2316`).
 - I2C: ToF round-robin + AS5600 - как в LoadPallet.
 - GPIO: pallet-датчики (инверсия F/R при `inverse`, `Cntrl_V2/Cntrl_V2.ino:L3408-L3435`), концевики, LED.
@@ -555,6 +602,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Блокирующие задержки без прямого yield: detect_Pallete debounce, `delay(5)` recapture, 100-мс паузы расширенного стопа, рамповые delay.
 
 **Профильные варианты 800/1000/1200**
+
 - pickup distance: 600; 1200 -> 670; 800 -> 500 при остатке канала < 1500 мм (`Cntrl_V2/Cntrl_V2.ino:L5382-L5386`).
 - recapture: 1000 -> 250, 1200 -> 450, иначе 100 (`Cntrl_V2/Cntrl_V2.ino:L5493-L5497`).
 - board-delay: база `2 + (150-maxSpeed)/10` (на 1 шаг меньше, чем у load), 1200 -> -3 (`Cntrl_V2/Cntrl_V2.ino:L5392-L5402`).
@@ -563,17 +611,20 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - pltMaxLn = shuttleLength - 20; профильные поправки закомментированы (`Cntrl_V2/Cntrl_V2.ino:L5428-L5431`).
 
 **Взаимодействие с inverse/FIFO/LIFO**
+
 - `unload_Pallete` при `fifoLifo` вызывает `fifoLifo_Inverse()` на входе и во ВСЕХ выходах (`Cntrl_V2/Cntrl_V2.ino:L5332-L5333`, `Cntrl_V2/Cntrl_V2.ino:L5353-L5354`, `Cntrl_V2/Cntrl_V2.ino:L5371-L5372`, `Cntrl_V2/Cntrl_V2.ino:L5459-L5460`, `Cntrl_V2/Cntrl_V2.ino:L5471-L5472`, `Cntrl_V2/Cntrl_V2.ino:L5510-L5511`, `Cntrl_V2/Cntrl_V2.ino:L5568-L5569`, `Cntrl_V2/Cntrl_V2.ino:L5584-L5585`, `Cntrl_V2/Cntrl_V2.ino:L5598-L5599`, `Cntrl_V2/Cntrl_V2.ino:L5637-L5638`, `Cntrl_V2/Cntrl_V2.ino:L5657-L5658`).
 - `fifoLifo_Inverse` (`Cntrl_V2/Cntrl_V2.ino:L4037-L4048`): при выходе из inverse пересчитывает `currentPosition = channelLength - currentPosition - 800` (константа 800 не зависит от shuttleLength); при входе в inverse позицию НЕ пересчитывает - асимметрия.
 - Инверсия действует на: маппинг pallet GPIO (`Cntrl_V2/Cntrl_V2.ino:L3408-L3435`), слоты ToF (`Cntrl_V2/Cntrl_V2.ino:L3483-L3503`), знак скорости `motorReverse ^ inverse` (`Cntrl_V2/Cntrl_V2.ino:L2113`), выбор таблицы энкодера в `moove_Distance_*` (`Cntrl_V2/Cntrl_V2.ino:L4859`, `Cntrl_V2/Cntrl_V2.ino:L5060`).
 - Факт: `single_Load`/`load_Pallete` НЕ вызывают `fifoLifo_Inverse` и не учитывают `fifoLifo` - асимметрия LOAD/UNLOAD относительно FIFO/LIFO.
 
 **Unknowns**
+
 - Семантика ожидания `distance[3] >= 800` и констант 900/600/800/150 в доставке - из source не устанавливается.
 - Почему WARN_PALLET_NOT_FOUND используется для «нет места впереди» (`Cntrl_V2/Cntrl_V2.ino:L5477-L5485`) - семантическое несоответствие кода и причины (суждение).
 - Поведение waitTime-цикла зависит от момента последней записи глобального `count` (обновляется в `motor_Stop`/предыдущих pace-циклах, не обновляется в цикле ожидания `distance[3] >= 800` `Cntrl_V2/Cntrl_V2.ino:L5561-L5574`) - фактическая длительность паузы ≤ waitTime; точное значение в runtime не определяется статически.
 
 **Disposition proposals (только предложения)**
+
 - Preserve: последовательность «подвод -> поиск назад -> board-delay -> подъём -> recapture -> доставка к началу -> placement -> опускание»; observable behavior сохраняется.
 - Preserve: профильные dst 600/670/500, recapture 100/250/450, maxbb-формулы, -25, формулы доводки с *0.96.
 - Change: timeout `2000000/maxSpeed` - валидация/защита от maxSpeed==0 (`Cntrl_V2/Cntrl_V2.ino:L5453`); деление на ноль при невалидном конфиге CFG_MAX_SPEED (запись без проверки, `Cntrl_V2/Cntrl_V2.ino:L2955-L2961`).
@@ -586,6 +637,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ---
 
 #### Явно зафиксированные аномалии (сводно)
+
 1. Деление на ноль: `2000000 / maxSpeed` при maxSpeed==0 (`Cntrl_V2/Cntrl_V2.ino:L5453`, `Cntrl_V2/Cntrl_V2.ino:L5802`); CFG_MAX_SPEED и MSG_CONFIG_SYNC_PUSH пишут значение без валидации (`Cntrl_V2/Cntrl_V2.ino:L2955-L2961`, `Cntrl_V2/Cntrl_V2.ino:L3051-L3052`).
 2. uint8_t-заворот maxbb при maxSpeed > 170 (unload) / > 180 (load): `2/3 + (150 - maxSpeed)/10` отрицательно -> до 253 итераций по 100 мс (~25 с) (`Cntrl_V2/Cntrl_V2.ino:L5392`, `Cntrl_V2/Cntrl_V2.ino:L5734`).
 3. Обратный поиск `single_Load` без таймаута: при тихом отказе `motor_Start_Reverse` (ToF gate, `Cntrl_V2/Cntrl_V2.ino:L2252-L2255`) цикл `Cntrl_V2/Cntrl_V2.ino:L5961-L5979` не выходит без внешнего stop/fault.
@@ -600,7 +652,6 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ---
 
 ## Группа: LongLoad / LongUnload / LongUnloadQuantity
-
 
 Источник: `C:/Projects/Shuttle/ShuttleController`, evidence SHA `708d090980155d4a8d4644f7bcf87c383e81cd1d`.
 Проверено: HEAD `4a226e5` отличается от evidence SHA только `docs/Controller-Nonblocking-Refactoring-Plan.md`; `git diff <evidence>..HEAD -- Cntrl_V2/` пуст (0 строк). Все anchors ниже сняты с working tree, совпадающей с evidence SHA по исходникам.
@@ -623,6 +674,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 #### LongLoad (CMD_LONG_LOAD = 0x22)
 
 **Entry points и call sites**
+
 - Поддерживается: `isSupportedCommand` включает `CMD_LONG_LOAD` (`.ino:8371`); проверка при парсинге `.ino:2782-2786` (иначе ACK_REJECTED `.ino:2784`).
 - IDLE-ветка loop(): приём команды -> `currentOperation = mapCmdToOperation(status)` (`.ino:1843`, маппинг `CMD_LONG_LOAD -> STATE_LONG_LOAD` `.ino:8237-8238`), `lastPalletePosition = 0` (`.ino:1845`), `send_Cmd()` (`.ino:1846`), `currentMode = CoreOpMode::AUTO_EXEC` (`.ino:1870`).
 - AUTO_EXEC: `run_Cmd()` (`.ino:1898-1900`); после: `if (status != CMD_STOP) status = 0; currentOperation = STATE_IDLE; currentMode = IDLE;` (`.ino:1902-1908`).
@@ -632,6 +684,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Прямо/косвенно вызываемые физические функции: `moove_Forward` (`.ino:5197-5265`), `lifter_Down` (`.ino:2453-2519`), `lifter_Up` (`.ino:2361-2452`), `load_Pallete` (`.ino:5662-5939`), `moove_Distance_R` (`.ino:5004-5195`), `moove_Distance_F` (`.ino:4803-4996`), `moove_Before_Pallete_F` (`.ino:4410-4512`), `stop_Before_Pallete_R` (`.ino:4518-4638`), `moove_Before_Pallete_R` (`.ino:4640-4795`), `motor_Start_Forward/Reverse` (`.ino:2239-2259`), `motor_Speed` (`.ino:2088-2237`), `motor_Stop` (`.ino:2261-2330`), `detect_Pallete` (`.ino:3406-3455`), `get_Distance` (`.ino:3857-3919`), `set_Position` (`.ino:3922-4034`), `blink_Work` (`.ino:4051-4133`), `blink_Warning` (`.ino:4134+`), `SystemYield` (`.ino:6839-7058`).
 
 **Admission/preconditions**
+
 - Последовательность в парсере команд (`.ino:2777-2882`): `isSupportedCommand` (`.ino:2782`) -> provisioning: `!isProvisionedShuttle() && !isUnprovisionedCommandAllowed(reqCmd)` -> ACK_BAD_ENVIRONMENT (`.ino:2818-2827`; разрешены непривязанным только STOP/STOP_MANUAL/SYSTEM_RESET/RESET_ERROR, `.ino:8405-8408`) -> `isErrorActive() && !isOverrideCommand` -> ACK_ERROR_STATE (`.ino:2832-2841`) -> `!inChannel && !isOutOfChannelExemptCommand` -> WARN_NOT_IN_CHANNEL + ACK_BAD_ENVIRONMENT (`.ino:2843-2853`; exempt-список `.ino:8411-8417`: STOP/STOP_MANUAL/SYSTEM_RESET/SAVE_EEPROM/GET_CONFIG/RESET_ERROR/lift) -> `canAcceptCommandNow` (`.ino:2855`).
 - `canAcceptCommandNow` (`.ino:8430-8461`): для CMD_LONG_LOAD ни одна специальная ветка не срабатывает -> fallback `return isShuttleIdle();` (`.ino:8460`); т.е. требуется `status == 0 || CMD_STOP` (`.ino:8424-8427`). Занятость -> ACK_BUSY (`.ino:2881`).
 - Дополнительный inChannel-контроль в loop() при старте: тройное чтение CHANNEL с `delay(5)` (`.ino:1828-1833`), отказ -> WARN_NOT_IN_CHANNEL + `status = 0` (`.ino:1835-1840`).
@@ -640,6 +693,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - При принятии команды `lastPalletePosition = 0` (`.ino:1845`) - сброс признака «канал полон» перед стартом.
 
 **Шаги и переходы (normal path)**
+
 1. ACK_OK отправляется парсером до исполнения (`.ino:2871`); telemetry-state override для радио `predictTelemetryStateForAcceptedCommand` (`.ino:8271-8291`).
 2. Dispatch: `send_Cmd()` (telemetry в SerialDisplay, `.ino:3400-3403`), `lifter_Down()` (`.ino:3351-3352`).
 3. `long_Load()`: лог "Starting continuos load...", `status = CMD_LONG_LOAD`, `moove_Forward()` - выезд к началу канала (`.ino:6237-6239`); abort-проверка (`.ino:6240-6241`).
@@ -655,6 +709,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 13. Завершение по каналу-полному: `status = 0` (=CMD_STOP) -> в dispatch `if (status != CMD_STOP)` ложен -> **выезд вперёд не выполняется**, шаттл остаётся в месте последней укладки; `status = CMD_STOP; send_Cmd();` (`.ino:3354-3357`).
 
 **Stop/fault/abort**
+
 - `shouldAbortLoop()` проверяется: после moove_Forward (`.ino:6240`), в поисковом заднем ходе (`.ino:6253-6258`, принудительно `status = CMD_STOP`), в обоих wait-циклах (`.ino:6281-6285`, `.ino:6295-6300`, `.ino:6338-6342`, `.ino:6352-6356` - `preserveManualStopOnAbort()`), после load_Pallete через `else if (shouldAbortLoop()) return;` (`.ino:6330-6331`).
 - CMD_STOP_MANUAL сохраняется `preserveManualStopOnAbort()` (`.ino:8585-8591`), но dispatch затем делает `if (status != CMD_STOP) moove_Forward();` (`.ino:3354`): при CMD_STOP_MANUAL вызывается moove_Forward, который сразу прерывается внутри (`.ino:5216-5221`), после чего `status = CMD_STOP` (`.ino:3356`) **перезаписывает CMD_STOP_MANUAL**.
 - Локальные fault-пути load_Pallete, завершающие long_Load через shouldAbortLoop: WARN_PALLET_SIZE_ERROR + `status = CMD_STOP` (`.ino:5780-5783`); WARN_OBSTACLE_AHEAD + `status = CMD_STOP` при занятом месте у начала канала (`.ino:5818-5822`) и при `distance[3] < 500 && distance[3] < distance[1]` (`.ino:5844-5849`); потеря паллеты в перехвате у конца канала -> `status = CMD_STOP` (`.ino:5887-5892`).
@@ -666,6 +721,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Любой active fault -> `currentMode = CoreOpMode::ERROR` на следующей итерации loop() (`.ino:1819-1820`) (cross-cutting).
 
 **Observable outcomes**
+
 - Штатное завершение (канал полон): WARN_CHANNEL_FULL (5000 ms), `status` в итоге CMD_STOP, `currentOperation` STATE_IDLE (`.ino:1906-1907`), шаттл остаётся в канале у последней укладки, финальный `send_Cmd()` (`.ino:3357`).
 - Ожидание паллеты: бессрочное, WARN_PALLET_NOT_FOUND выставляется только при первичном ненахождении (`.ino:6273`); в wait-циклах предупреждение не повторяется.
 - Прерывание: status CMD_STOP (или перезаписанный CMD_STOP_MANUAL -> CMD_STOP), финальная telemetry через `send_Cmd()` (`.ino:3357`).
@@ -701,6 +757,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | 5000 ms | все setWarning в scope | configured | авто-истечение warning |
 
 **Resource effects**
+
 - CAN: скорость движения ID 100 (`motor_Speed`, `.ino:2096`), лифтер ID 101 (`.ino:2374`, `.ino:2463`), чтение/очистка RX в blink_Work (`.ino:4057`) и motor-функциях (`.ino:2296-2297` и др.).
 - I2C: ToF-опрос round-robin 4 сенсоров из get_Distance (`.ino:3857-3919`, не чаще раза в 8 ms на сенсор `.ino:3861-3862`, с quiet-guard относительно BMS TX `.ino:3864-3869`); AS5600 в set_Position через `readAs5600AngleForMotion` (`.ino:3923-3929`).
 - GPIO: pallet-датчики DATCHIK_F1/F2/R1/R2 (`.ino:3406-3455`), CHANNEL (`.ino:1828-1833`, `.ino:2830`), концевики DL_UP/DL_DOWN (`.ino:2363`, `.ino:2455`), LED в blink_Work/blink_Warning.
@@ -709,6 +766,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Flash/EEPROM: логи makeLog; статистика loadCounter в sramStats (`.ino:5938`), сохранение по pendingEepromSave (`.ino:1811-1815`).
 
 **Профильные варианты 800/1000/1200 (в load-пути)**
+
 - `dst` заезда под паллету: 600 мм базово, 670 при shuttleLength==1200 (`.ino:5724-5726`); 800-специфичная правка закомментирована (`.ino:5728`).
 - maxbb (число выдержек под доской): `3 + (150 - maxSpeed) / 10`, +3 при distance[1] < 300, -3 при 1200 (`.ino:5734-5744`).
 - Контроль длины паллеты: `pltMaxLn = shuttleLength - 20` (`.ino:5771`); профильные вычеты закомментированы (`.ino:5772-5774`).
@@ -717,11 +775,13 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - shuttleLength конфигурируется CFG_SHUTTLE_LEN (`.h:124` подразумевается; запись `.ino:2951-2952`, EEPROM `.ino:7594`), значение по умолчанию 1000 (`.ino:598`); клампа значения в source нет (в отличие от waitTime).
 
 **Unknowns**
+
 - Физический смысл `distance[3] < 1000` как «паллета подана погрузчиком» - установлено только по контексту wait-циклов; кто и как кладёт паллету, source не фиксирует.
 - Реальная вместимость канала при условии `lastPalletePosition < shuttleLength * 2` зависит от channelLength и размеров паллет; из source выводится только эвристика.
 - Длительность полного цикла не устанавливается (зависит от длины канала, числа паллет, waitTime-подобных ожиданий нет).
 
 **Disposition proposals (только предложения)**
+
 - Preserve: бессрочное ожидание паллеты вместо завершения по «паллета не найдена» - это заявленный инвариант каталога V3; подтверждён source (`.ino:6278-6305`, `.ino:6335-6361`).
 - Preserve: завершение только по заполнению канала (`lastPalletePosition < shuttleLength * 2`) - единственный штатный выход (`.ino:6314-6320`).
 - Change: `status = 0` как «канал полон» (`.ino:6318`) неотличим от CMD_STOP (CMD_STOP=0x00, `.h:87`) - в V3 нужен различимый результат завершения.
@@ -736,6 +796,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 #### LongUnload (CMD_LONG_UNLOAD = 0x23)
 
 **Entry points и call sites**
+
 - `isSupportedCommand` включает CMD_LONG_UNLOAD (`.ino:8372`); парсинг `.ino:2782-2786`.
 - IDLE-ветка: `mapCmdToOperation`: CMD_LONG_UNLOAD -> STATE_LONG_UNLOAD (`.ino:8239-8240`); `lastPalletePosition = 0` (`.ino:1845`); `currentMode = AUTO_EXEC` (`.ino:1870`); MANUAL-ветка также диспетчеризует (`.ino:2006-2010`).
 - Dispatch в `run_Cmd` (`.ino:3359-3373`):
@@ -751,11 +812,13 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Косвенно: `unload_Pallete` (`.ino:5329-5659`), `moove_Before_Pallete_R` (`.ino:4640-4795`), `stop_Before_Pallete_F` (`.ino:4292-4408`), `moove_Before_Pallete_F` (`.ino:4410-4512`), `moove_Distance_R/F`, `lifter_Up/Down`, `fifoLifo_Inverse` (`.ino:4037-4049`), motor-функции, `SystemYield`.
 
 **Admission/preconditions**
+
 - Идентичны LongLoad (isSupportedCommand, provisioning, error-state, inChannel, `canAcceptCommandNow` -> `isShuttleIdle()` `.ino:8460`); аргументов нет.
 - Принятие: ACK_OK (`.ino:2871`), при занятости ACK_BUSY (`.ino:2881`).
 - `lastPalletePosition = 0` при принятии (`.ino:1845`).
 
 **Шаги и переходы (normal path)**
+
 1. `long_Unload()`: сохраняет `oldInterPalleteDistance`, ставит `interPalleteDistance = 700` (`.ino:6368-6369`) - временный override межпаллетной дистанции на время операции (восстановление `.ino:6451`).
 2. Если `fifoLifo` - `fifoLifo_Inverse()` (`.ino:6371-6372`): инверсия направления/сенсоров (см. раздел FIFO/LIFO).
 3. `moove_Forward()` к началу канала (`.ino:6373`); abort -> восстановление inverse/interPalleteDistance + return (`.ino:6374-6380`).
@@ -781,6 +844,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
    - bookkeeping: `lastPalletePosition = pstn + 800|1000 + interPalleteDistance` (`.ino:5644-5647`), `lastPallete = pstn ? 1 : 0` (`.ino:5648-5651`), `unloadCounter++` (`.ino:5656`).
 
 **Stop/fault/abort**
+
 - shouldAbortLoop в long_Unload: `.ino:6374`, `.ino:6395`, `.ino:6406-6413`, `.ino:6424-6431` (два последних принудительно ставят `status = CMD_STOP` и восстанавливают inverse/interPalleteDistance).
 - shouldAbortLoop внутри unload_Pallete: `.ino:5350-5356`, `.ino:5365-5373` (ставит CMD_STOP), `.ino:5411-5416` (preserveManualStopOnAbort), `.ino:5505-5513`, `.ino:5563-5571`, `.ino:5579-5588`, `.ino:5594-5602`, `.ino:5635-5639`.
 - Ранний return dispatch (`.ino:3367-3368`): `status == CMD_STOP && distance[1] > 100` (прерывание в глубине канала) или любой active fault -> без выездного moove_Forward и без финального send_Cmd; управление возвращается в AUTO_EXEC, где `status != CMD_STOP` сбрасывается в 0 (`.ino:1902-1904`).
@@ -791,6 +855,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - `waitTime`-ожидание (`.ino:5575`) проверяет shouldAbortLoop (`.ino:5579-5588`).
 
 **Observable outcomes**
+
 - Штатное завершение (канал пуст): последняя итерация завершается WARN_OBSTACLE_AHEAD + LOG_ERROR "Pallete error..." из финального безрезультатного поиска досок (`.ino:5453-5462`) - это нормальный путь выхода, затем `distance[0] < 200 + chnlOffset` -> break (`.ino:6389-6394`); status=CMD_LONG_UNLOAD -> выезд `moove_Forward()` (`.ino:3370`) -> шаттл у начала канала; `status = CMD_STOP; send_Cmd();` (`.ino:3371-3372`).
 - Прерывание в глубине канала: ранний return, статус CMD_STOP/0, шаттл остаётся на месте; warning/fault по причине.
 - Счётчики: `unloadCounter++` за каждую снятую паллету (`.ino:5656`); StatsPacket (`.ino:8930`).
@@ -824,9 +889,11 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | distance[1] > 100 мм | `.ino:3367` | configured | порог раннего return dispatch |
 
 **Resource effects**
+
 - Как в LongLoad; дополнительно: CAN-записи нулевой скорости 10×100 ms в motor_Stop при выезде с паллетой (`.ino:2305-2316`); `delay(10)` в рампе motor_Stop (`.ino:2289`).
 
 **Профильные варианты 800/1000/1200 (в unload-пути)**
+
 - dst: 600 базово; 670 при 1200; **500 при 800 у конца канала** (`channelLength - currentPosition - shuttleLength < 1500 && shuttleLength == 800`) (`.ino:5382-5386`) - активно, в отличие от load-пути.
 - maxbb: `2 + (150 - maxSpeed) / 10`, +3 при distance[0] < 300, -3 при 1200 (`.ino:5392-5402`) - база 2 против 3 в load.
 - pltMaxLn = shuttleLength - 20 (`.ino:5428`), профильные вычеты закомментированы (`.ino:5429-5431`).
@@ -834,10 +901,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - stop_Before_Pallete_F: `dist -= 25` при 1000/1200 (`.ino:4397-4398`).
 
 **Unknowns**
+
 - Физическая логика `while (distance[3] < 900 && distance[1] > 700)` (`.ino:6403`): точный сценарий (паллета ещё не забрана конвейером/погрузчиком при отъезде шаттла) устанавливается только по контексту.
 - Почему опускание паллеты перенесено из unload_Pallete в long_Unload (`.ino:5642-5643` vs `.ino:6448`) - из source следует только механика longWork.
 
 **Disposition proposals (только предложения)**
+
 - Preserve: завершение по заднему концу канала `distance[0] < 200 + chnlOffset` (`.ino:6389`) - соответствует инварианту «останов при заполнении/конце канала, не при отсутствии паллеты».
 - Change: WARN_OBSTACLE_AHEAD + LOG_ERROR как побочный эффект штатного завершения (`.ino:5453-5462`) - в V3 различать «паллет больше нет» и «препятствие».
 - Change: `distance[1] > 100` в раннем return без chnlOffset (`.ino:3367`) - несогласованность с остальными порогами (`90 + chnlOffset` и др.).
@@ -851,6 +920,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 #### LongUnloadQuantity (CMD_LONG_UNLOAD_QTY = 0x24)
 
 **Entry points и call sites**
+
 - `isSupportedCommand` включает CMD_LONG_UNLOAD_QTY (`.ino:8373`); объявление `.h:110` с пометкой `Requires MSG_CMD_WITH_ARG`.
 - Парсинг аргумента: `if (realMsgID == MSG_CMD_WITH_ARG) { ... else if (reqCmd == CMD_LONG_UNLOAD_QTY) UPQuant = (uint8_t)cmdArgs->arg; }` (`.ino:2857-2863`); `ParamCmdPacket {int32_t arg; uint8_t cmdType}` (`.h:367-371`) - arg усекается до uint8_t (0-255).
 - IDLE-ветка: `mapCmdToOperation`: CMD_LONG_UNLOAD_QTY -> STATE_LONG_UNLOAD_QTY (`.ino:8241-8242`); `lastPalletePosition = 0` (`.ino:1845`); AUTO_EXEC (`.ino:1870`).
@@ -862,11 +932,13 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Функция `long_Unload(uint8_t num)` `.ino:6457-6556` (объявление `.ino:267`).
 
 **Admission/preconditions**
+
 - Как у LongUnload; дополнительно: команда обязана прийти в MSG_CMD_WITH_ARG, иначе `UPQuant` сохранит значение от предыдущей команды. Проверки типа сообщения на сам reqCmd нет: если CMD_LONG_UNLOAD_QTY придёт в MSG_CMD_SIMPLE, парсер не запишет аргумент (`.ino:2857`), и будет использован старый/нулевой UPQuant.
 - qty=0: `UPQuant = 0` -> цикл `while (detect && num)` (`.ino:6473`) не выполняется ни разу; функция восстанавливает interPalleteDistance/inverse и возвращается (`.ino:6553-6555`); dispatch затем выполняет выездной `moove_Forward()` (статус != CMD_STOP).
 - qty больше числа паллет в канале: цикл завершается по условию «канал пуст» `distance[0] < 200 + chnlOffset` (`.ino:6484-6489`); остаток `num` отбрасывается, UPQuant сбрасывается в 0 в dispatch (`.ino:3382`).
 
 **Шаги и переходы (normal path)**
+
 1. `interPalleteDistance = 700` (`.ino:6459-6460`), fifoLifo-инверсия (`.ino:6462-6463`), `moove_Forward()` (`.ino:6464`), abort-обработка (`.ino:6465-6471`).
 2. Цикл `while (detect && num)` (`.ino:6473`):
    - `status = CMD_LONG_UNLOAD_QTY; send_Cmd();` (`.ino:6475-6476`) - периодическая telemetry в Display на каждой итерации (отличие от безаргументного варианта);
@@ -883,10 +955,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 4. Dispatch: `UPQuant = 0; longWork = 0;` (`.ino:3382-3383`); ранний return `(status == CMD_STOP && distance[1] > 100) || isErrorActive()` (`.ino:3384-3385`); иначе выезд `status = CMD_MOVE_RIGHT_MAN; moove_Forward(); status = CMD_STOP; send_Cmd();` (`.ino:3386-3389`).
 
 **Stop/fault/abort**
+
 - Идентично LongUnload: shouldAbortLoop в циклах (`.ino:6465`, `.ino:6490`, `.ino:6503-6510`, `.ino:6520-6527` - последние два ставят CMD_STOP), внутри unload_Pallete те же пути; lifter/ToF/move fault'ы те же.
 - Отличие: при прерывании `num`/`UPQuant` не восстанавливаются, но UPQuant всё равно сбрасывается в dispatch (`.ino:3382`).
 
 **Observable outcomes**
+
 - Завершение по qty: после `num` успешных снятий цикл выходит без отъезда (`.ino:6550-6551`), статус CMD_LONG_UNLOAD_QTY -> выезд вперёд (`.ino:3386-3387`) -> CMD_STOP + send_Cmd. Шаттл у начала канала.
 - Завершение по пустому каналу раньше qty: WARN_OBSTACLE_AHEAD из финального поиска (как в LongUnload) + break (`.ino:6484-6489`).
 - Telemetry: три send_Cmd на итерацию (`.ino:6476`, `.ino:6498`, `.ino:6549`) - единственный long-вариант с внутрицикловой рассылкой.
@@ -894,19 +968,24 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - unloadCounter++ за каждую снятую паллету (`.ino:5656`); currentOperation = STATE_LONG_UNLOAD_QTY в telemetry (`.ino:8830`).
 
 **Timing conditions**
+
 - Таблица LongUnload полностью (общие подфункции) + `num` итераций; дополнительных временных констант у QTY-варианта нет.
 
 **Resource effects**
+
 - Как LongUnload + дополнительные записи telemetry в SerialDisplay на каждой итерации (`.ino:6476`, `.ino:6498`, `.ino:6549`).
 
 **Профильные варианты**
+
 - Идентичны LongUnload (общая unload_Pallete).
 
 **Unknowns**
+
 - Ожидаемое поведение при qty=0 (штатный «нулевой» прогон с выездом или ошибка аргумента) в source не специфицировано - фактически выполняется холостой прогон с выездом.
 - Нет валидации верхней границы arg (int32_t -> uint8_t, `.ino:2863`): значения >255 усечения; интерпретация 256 как 0 не документирована.
 
 **Disposition proposals (только предложения)**
+
 - Preserve: семантика «выгрузить N паллет или до конца канала, что раньше» (`.ino:6473`, `.ino:6484-6489`).
 - Change: отсутствие валидации/нормализации аргумента (0, >числа паллет, усечение int32->uint8, `.ino:2863`) - в V3 явные правила для qty=0 и qty>доступно.
 - Change: `UPQuant--` не наблюдаем (`.ino:6547`, нет в telemetry `.ino:8820-8840`) - либо убрать, либо выставлять оставшееся количество в telemetry.
@@ -919,6 +998,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 #### Флаг longWork
 
 **Факты**
+
 - Объявление: `uint8_t longWork = 0; // Флаг продолжительной загрузки/выгрузки` (`.ino:608`).
 - Записи: только в dispatch: `longWork = 1` / `longWork = 0` вокруг `long_Unload()` (`.ino:3362`, `.ino:3366`) и вокруг `long_Unload(UPQuant)` (`.ino:3377`, `.ino:3383`).
 - **CMD_LONG_LOAD longWork НЕ устанавливает** (dispatch `.ino:3349-3358` не трогает флаг) - асимметрия между long load и long unload.
@@ -929,6 +1009,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Вывод: фактическая роль longWork в V1 - отложить опускание лифта из unload_Pallete в long_Unload; ветка load_Pallete с longWork==1 - мёртвая логика (недостижима при текущем dispatch).
 
 **Disposition proposals**
+
 - Change: асимметрия (unload ставит флаг, load нет) и мёртвая ветка в load_Pallete (`.ino:5928-5933`) - в V3 либо явный контракт «кто опускает лифт в long-цикле», либо удаление флага.
 
 ---
@@ -936,6 +1017,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 #### FIFO/LIFO
 
 **Факты**
+
 - `uint8_t fifoLifo = 0; // Режим FIFO/LIFO -сохранять-` (`.ino:611`); конфигурируется CFG_FIFO_LIFO=9 (`.h:132`, запись `.ino:2990-2996`, полная конфигурация `.ino:3063-3064`, ответ GET_CONFIG `.ino:3089`, `.ino:3149`, EEPROM save/load `.ino:7593`, `.ino:7627`).
 - `fifoLifo_Inverse()` (`.ino:4037-4049`): переключает глобальный `inverse`; при inverse 1->0 делает `currentPosition = channelLength - currentPosition - 800` (`.ino:4040-4043`); при 0->1 позиция не пересчитывается (асимметрия).
 - Эффекты `inverse`:
@@ -949,6 +1031,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - `endOfChannel` (`.ino:583`): устанавливается при достижении заднего конца в moove_Reverse (`.ino:5314-5316`), moove_Before_Pallete_R (`.ino:4790-4791`), moove_Distance_R (`.ino:5148-5152` - только channelLength без endOfChannel), в перехвате unload_Pallete (`.ino:5518-5525`); читается в скоростном профиле moove_Before_Pallete_R (`.ino:4729-4733`). Сброса endOfChannel в long-операциях нет (grep: записи только в перечисленных местах).
 
 **Disposition proposals**
+
 - Preserve: поддержка FIFO/LIFO как направление long-операций (подтверждено механизмом inverse).
 - Change: двойной конфигурационный флаг (fifoLifo + inverse) с одним физическим эффектом и асимметричный пересчёт currentPosition (`.ino:4037-4049` vs отсутствие при 0->1) - унифицировать в V3.
 - Unknown: взаимодействие fifoLifo и long_Load - в V1 long_Load инверсию не использует (вызовов нет); является ли это intended (LIFO-load через reverse-конфигурацию шаттла) - из source не устанавливается.
@@ -958,6 +1041,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 #### Условия остановки циклов (ключевой инвариант)
 
 Факты (проверено по source):
+
 1. **LongLoad не завершается от отсутствия паллеты.** Оба wait-цикла (`.ino:6278-6305`, `.ino:6335-6361`) бессрочные: выход только по появлению паллеты (`detectPalleteF1 && detectPalleteF2 || distance[3] < 1000`) или по shouldAbortLoop. WARN_PALLET_NOT_FOUND выставляется один раз при первичном ненахождении (`.ino:6273`) и не является условием выхода.
 2. **LongLoad завершается штатно только по «канал полон»**: `lastPalletePosition && lastPalletePosition < shuttleLength * 2` -> WARN_CHANNEL_FULL, return (`.ino:6314-6320`; дублирующий pre-check в load_Pallete `.ino:5671-5677` ставит CMD_STOP). Других штатных выходов из `while(1)` (`.ino:6310`) нет - в частности, нет выхода по «конец канала» как отдельному условию: конец канала (distance[1] <= 90+chnlOffset) обрабатывается как позиция у начала с отъездом назад (`.ino:6323-6328`) или creep'ом в moove_Forward (`.ino:5246-5257`).
 3. **LongUnload/Qty завершаются штатно по «канал пуст» = шаттл у заднего конца**: `distance[0] < 200 + chnlOffset && !isErrorActive()` (`.ino:6389-6394`, `.ino:6484-6489`); Qty дополнительно по исчерпанию `num` (`.ino:6473`, `.ino:6550-6551`). Отдельного условия «паллета не найдена» как штатного завершения нет: отсутствие паллет проявляется через упор в конец канала при поиске.
@@ -985,7 +1069,6 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 
 ## Группа: CompactPallets (F/R), CountPallets, Demo
 
-
 Источник: `C:/Projects/Shuttle/ShuttleController` (локальное зеркало). Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD `4a226e5` отличается только `docs/Controller-Nonblocking-Refactoring-Plan.md` (не используется). Все anchors прочитаны и сверены с working tree.
 
 Общие координаты файлов: `Cntrl_V2/Cntrl_V2.ino`, `Cntrl_V2/ShuttleProtocol.h`.
@@ -995,13 +1078,16 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 0. Общий контекст группы (единый для трёх операций)
 
 #### 0.1 Объявления команд
+
 - `CMD_DEMO = 0x06`: `Cntrl_V2/ShuttleProtocol.h:L93` (блок "Lifecycle & State").
 - `CMD_COMPACT_F = 0x25`, `CMD_COMPACT_R = 0x26`, `CMD_COUNT_PALLETS = 0x27`: `Cntrl_V2/ShuttleProtocol.h:L111-L113` (блок "Auto Operations").
 
 #### 0.2 Supported-список
+
 - `isSupportedCommand()`: `Cntrl_V2/Cntrl_V2.ino:L8351-L8384`. В switch присутствуют `CMD_DEMO` (L8360), `CMD_COMPACT_F` (L8374), `CMD_COMPACT_R` (L8375), `CMD_COUNT_PALLETS` (L8376) - все три операции формально поддержаны.
 
 #### 0.3 Путь приёма команды (admission, общий)
+
 1. Приём кадра и парсинг - `pollSerial()` для display UART и radio UART, вызывается только из `SystemYield()`: `Cntrl_V2/Cntrl_V2.ino:L6950` (display), `L6954` (radio). Возврат команды через `processPacket()`: `L3215-L3221`.
 2. `processPacket()`: `L2713-L2930`. Проверки для MSG_CMD_SIMPLE/MSG_CMD_WITH_ARG (`L2778`):
    - `isSupportedCommand(reqCmd)` - иначе `ACK_REJECTED` (`L2782-L2786`).
@@ -1013,6 +1099,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 3. Присвоение `status` выполняется в `SystemYield()`: stop-команды приоритетны (`L6962-L6973`, сразу `motor_Stop()`); обычные команды - `status = cmdRad` / `status = cmdDisp` только при `canAcceptCommandNow` (`L6975-L7004` radio, `L7005-L7035` display). Факт: новая операция не может быть назначена во время выполнения другой (guard `isShuttleIdle`), stop проходит всегда.
 
 #### 0.4 Запуск операции из loop()
+
 - `loop()`: `Cntrl_V2/Cntrl_V2.ino:L1805`. Каждый проход: `SystemYield()` (`L1807`), `get_Distance()` (`L1817`), `if (isErrorActive()) currentMode = CoreOpMode::ERROR` (`L1819-L1820`).
 - `case CoreOpMode::IDLE` (`L1824`): при `status != 0 && status != CMD_STOP` (`L1826`) - повторная проверка in-channel с тройным опросом `digitalRead(CHANNEL)` и `delay(5)` (`L1829-L1833`); при провале - `makeLog(LOG_WARN, "Command 0x%02X rejected: Shuttle not in channel", status)`, `setWarning(WARN_NOT_IN_CHANNEL, 5000)`, `status = 0` (`L1835-L1839`).
 - При успехе: `currentOperation = mapCmdToOperation(status)` (`L1843`), лог "Shuttle accepted CMD" (`L1844`), `lastPalletePosition = 0` (`L1845`), `send_Cmd()` (`L1846`), `currentMode = CoreOpMode::AUTO_EXEC` (`L1870`, ветка не-manual).
@@ -1021,12 +1108,14 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Из `CoreOpMode::MANUAL` (`L1911`) через `run_Cmd()` диспетчеризуются только CMD_LOAD/UNLOAD/LONG_LOAD/LONG_UNLOAD (`L1990-L2010`); DEMO/COMPACT/COUNT в MANUAL-ветке отсутствуют, а приём в MANUAL блокируется `canAcceptCommandNow` (не idle) - недостижимы из manual-режима.
 
 #### 0.5 Dispatch в run_Cmd() и мёртвые ветки (ordering-баг)
+
 `run_Cmd()`: `Cntrl_V2/Cntrl_V2.ino:L3228`. Ветки группы:
 
 - DEMO: `L3308-L3312` - `demo_Mode(); firstPalletePosition = 0;` - **нет ни одного `send_Cmd()` в ветке** (в отличие от всех соседних операций).
 - COUNT_PALLETS: `L3313-L3324` - `pallete_Counting_F(); status = CMD_STOP; send_Cmd(); status = CMD_COUNT_PALLETS; makeLog(LOG_INFO, "Pallete count = %d", palleteCount); status = CMD_MOVE_RIGHT_MAN; moove_Forward(); status = CMD_STOP; send_Cmd();` - нет входного `send_Cmd()` перед функцией.
 - COMPACT_F: `L3330-L3338`:
-  ```
+
+  ```cpp
   send_Cmd();                       // L3332
   pallete_Compacting_F();           // L3333
   status = CMD_STOP;                // L3334
@@ -1034,8 +1123,10 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
       moove_Forward();              // L3336  <- МЁРТВО
   send_Cmd();                       // L3337
   ```
+
 - COMPACT_R: `L3339-L3348`:
-  ```
+
+  ```cpp
   send_Cmd();                       // L3341
   pallete_Compacting_R();           // L3342
   firstPalletePosition = 0;         // L3343
@@ -1050,6 +1141,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 Дополнительно: `firstPalletePosition = 0` на L3343 (COMPACT_R) - живой код: ранние `return` из `pallete_Compacting_R()` оставляют `firstPalletePosition` ненулевым, сброс делает dispatch. В COMPACT_F сброса нет, но `pallete_Compacting_F` его и не пишет.
 
 #### 0.6 send_Cmd, ACK, телеметрия
+
 - `send_Cmd()`: `L3400-L3403` - `sendTelemetryPacket(&SerialDisplay)`; это снапшот телеметрии в display-UART, а не радио-ACK. ACK-коды отправляются отдельно `sendCommandAck` (cross-cutting).
 - `sendTelemetryPacket()`: `L8793`; `pkt->shuttleStatus = currentOperation` (`L8828`), `pkt->palleteCount = palleteCount` (`L8834`) - счётчик паллет и состояние операции наблюдаемы в каждом пакете телеметрии.
 
@@ -1058,6 +1150,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 1. CompactPallets Forward (CMD_COMPACT_F = 0x25)
 
 #### Entry points и call sites
+
 - Объявление прототипа: `Cntrl_V2/Cntrl_V2.ino:L268` (`void pallete_Compacting_F();`).
 - Определение: `Cntrl_V2/Cntrl_V2.ino:L6138-L6183`.
 - Dispatch: `L3330-L3338` (см. 0.5). Единственный call site - `L3333`.
@@ -1065,10 +1158,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Косвенно через `load_Pallete()`: `moove_Before_Pallete_F()` (`L4410-L4517`), `moove_Distance_F/R`, `lifter_Up()` (`L2361`), `stop_Before_Pallete_R()` (`L4518-L4638`) -> `moove_Before_Pallete_R()` (`L4640-L4795`), `set_Position()` (`L3922-L4036`), `setWarning()` (`L550-L553`), `blink_Warning()` (`L4134+`).
 
 #### Admission/preconditions
+
 - Полный путь 0.3: supported (L8374), provisioning, !error, in-channel (двойная проверка: processPacket L2839-L2850 и loop L1829-L1839), `isShuttleIdle()`. Аргументов у команды нет (MSG_CMD_SIMPLE).
 - Внутри функции: lifter опускается только если `!digitalRead(DL_DOWN)` (L6141-L6142).
 
 #### Шаги и переходы (normal path)
+
 1. Лог "Start compacting pallete forward..." (L6140).
 2. Lifter вниз при необходимости (L6141-L6142).
 3. `moove_Reverse()` (L6143) - проезд к концу канала (reverse-торец, `distance[0]`-сторона); при `lifterUp` `moove_Reverse` вместо полного проезда делает `stop_Before_Pallete_R()` + `lifter_Down()` (L5272-L5277). Обновляет `channelLength` на торце (L5309-L5316).
@@ -1080,6 +1175,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 Условия завершения: естественное - L6173-L6174; выходы по abort - см. ниже. Цикл L6167 теоретически может быть покинут только через `return`: тело завершается `status = CMD_COMPACT_F` (L6181), поэтому условие `status != CMD_STOP` на следующей итерации всегда истинно.
 
 #### Подоперация load_Pallete() (L5662-L5939), используемая Compact_F
+
 1. Проверка "канал не забит": `lastPalletePosition && lastPalletePosition < shuttleLength * 2` -> `WARN_CHANNEL_FULL`, `status = CMD_STOP`, return (L5671-L5677).
 2. Подход к паллету: если не в стартовой конфигурации - `moove_Before_Pallete_F()` при `distance[3] > 750` (L5687-L5689); движение вперёд к доскам со скоростью 20/oldSpeed (L5697-L5705).
 3. Передняя доска: `moove_Distance_F(dst, oldSpeed, 10)`, `dst = 600` (670 при shuttleLength==1200) (L5722-L5729).
@@ -1090,12 +1186,14 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 8. `lifter_Down()` при `!longWork && lifterUp`, `lastPallete = 1`, `lastPalletePosition = currentPosition` (L5928-L5932), `loadCounter++` (L5938).
 
 #### Stop/fault/abort
+
 - `shouldAbortLoop()` (cross-cutting, L8598-L8601) проверяется: после `moove_Reverse` (L6144-L6145, return без смены status), в цикле подхода (L6154-L6159: `motor_Stop`, `status = CMD_STOP`, return), в цикле перестановки (L6175-L6180: то же).
 - `SystemYield()` вызывается на каждой итерации обоих циклов (L6152, L6169) и внутри всех подфункций движения - stop-команда из UART принимается в любой момент; `motor_Stop()` при stop выполняется уже в SystemYield (L6972).
 - Внутренние faults подфункций: `FAULT_MOTOR_STALL` из `blink_Work` (L4078-L4085: `motor_Stop`, `status = CMD_STOP`, `setFault`) - далее `shouldAbortLoop` завершает операцию; `FAULT_LIFTER_TIMEOUT` из `lifter_Down` (L2500-L2506); ToF-faults и safety - через `get_Distance`/SystemYield (cross-cutting). Любой active fault -> `isErrorActive` -> abort + `CoreOpMode::ERROR` в loop (L1819-L1820).
 - Warnings, устанавливаемые на пути (не faults): WARN_CHANNEL_FULL (L5674), WARN_PALLET_SIZE_ERROR (L5780), WARN_OBSTACLE_AHEAD (L5807, L5820) - операция при этом завершается через `status = CMD_STOP`/abort, но не переходит в ERROR (warnings != faults).
 
 #### Observable outcomes
+
 - `sramStats->payload.compactCounter` инкрементируется после КАЖДОГО вызова `load_Pallete()`, включая неудачные (L6172) - факт; счётчик завышается при прерванных циклах. Поле `StatsPacket.compactCounter`: `ShuttleProtocol.h:L277`, выдача в stats-пакет `L8931`.
 - `loadCounter++` на каждый успешный перенос (L5938, `ShuttleProtocol.h:L275`).
 - Финал: `status = CMD_STOP` (dispatch L3334), `currentOperation = STATE_IDLE` (L1906), телеметрия `shuttleStatus = STATE_COMPACT` во время исполнения (L1843, L8828).
@@ -1103,6 +1201,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Позиция: `currentPosition` обновляется `set_Position()` по AS5600 (L3922); `channelLength` уточняется в `moove_Reverse` на торце (L5313).
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | Шаг подхода 100 мм, maxSpeed 25, minSpeed 25 | L6153 | configured | дискретный подъезд к штабелю |
@@ -1119,6 +1218,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | Stall-детект 1500 мс | L4078 | configured | FAULT_MOTOR_STALL при пробуксовке |
 
 #### Resource effects
+
 - CAN: скорости/останов ID 100 (`motor_Speed` L2094, `motor_Stop` L2267), lifter ID 101 (`lifter_Down` L2464); `blink_Work` и `motor_Stop` дренируют CAN RX (L4057, L2265).
 - I2C: ToF-опрос `get_Distance()` ротирует 4 сенсора, троттлинг >= 8 мс (L3861), пауза при BMS TX (L3864-L3869).
 - GPIO: 4 паллетных сенсора с debounce `delay(5)` (`detect_Pallete` L3414-L3460), DL_DOWN/DL_UP endstops, CHANNEL, GREEN/WHITE LED (blink_Work), RED/ZOOMER (blink_Warning в подфункциях).
@@ -1127,6 +1227,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Delays: `delay(5)` в detect_Pallete и перехватах (L5536, L5903 - в load/unload, но load_Pallete использует L5903).
 
 #### Профильные варианты 800/1000/1200
+
 - `dst` заезда под паллет: 600 (800/1000), 670 (1200) - L5724-L5726.
 - `maxbb`: `-3` при 1200 (L5737-L5743) - меньше дожима.
 - Перехват: dist 100/250/450 для 800/1000/1200 (L5862-L5866).
@@ -1134,10 +1235,12 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Закомментированные профильные поправки `pltMaxLn -= 20/100/150` (L5770-L5772) - мёртвые комментарии.
 
 #### Unknowns
+
 - Физическая скорость 25/oldSpeed в единицах расстояния/времени из source не устанавливается (единицы `motor_Speed` - условные 0-100, L2100-L2102).
 - Реакция на ситуацию "паллет нет вовсе" в цикле перестановки: `load_Pallete` в этом случае упирается в WARN_OBSTACLE_AHEAD/WARN_PALLET_SIZE_ERROR, но отдельного "empty channel" исхода у Compact_F нет - поведение при пустом канале определяется этими warning-путями.
 
 #### Disposition proposals
+
 - Мёртвый выход `moove_Forward()` после компакта (L3335-L3336): **change** - в V3 либо удалить, либо восстановить корректный порядок (как в LONG_LOAD), предварительно выяснив у заказчика, нужен ли выезд после компакта.
 - Инкремент `compactCounter` до проверки результата load_Pallete (L6172): **change** - считать только успешные переносы.
 - Semantics "уплотнение к концу канала через load_Pallete": **preserve** - функциональное ядро.
@@ -1149,14 +1252,17 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 2. CompactPallets Reverse (CMD_COMPACT_R = 0x26)
 
 #### Entry points и call sites
+
 - Прототип: `L269`. Определение: `L6186-L6232`. Dispatch: `L3339-L3348`, call site `L3342`.
 - Прямо вызываемые: `moove_Forward()` (L6189; `L5197-L5263`), `get_Distance()` (L6192/L6207), `detect_Pallete()` (L6194), `moove_Distance_R(100, 25, 25)` (L6199; `L5004-L5196`), `motor_Speed()` (L6209/L6211), `motor_Stop()` (L6202/L6224), `unload_Pallete()` (L6218; `L5329-L5660`), `blink_Work()` (L6217).
 - Косвенно через `unload_Pallete()`: `fifoLifo_Inverse()` (`L4037-L4048`), `moove_Before_Pallete_R()` (L5347), `lifter_Up/Down`, `stop_Before_Pallete_F()` (L5633; `L4292-L4408`) -> `moove_Before_Pallete_F()` (L4410), `set_Position`, `setWarning`, `blink_Warning`.
 
 #### Admission/preconditions
+
 - Идентично Compact_F (0.3), supported на L8375. Аргументов нет.
 
 #### Шаги и переходы (normal path)
+
 1. Лог "Start compacting pallete reverse..." (L6188).
 2. `moove_Forward()` (L6189) - проезд к переднему торцу (началу канала, `distance[1]`-сторона); при `lifterUp` - `stop_Before_Pallete_F()` + `lifter_Down()` (L5202-L5207).
 3. `get_Distance()` (L6192), `status = CMD_COMPACT_R` (L6193), `detect_Pallete()` (L6194).
@@ -1167,6 +1273,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 **Факт (мёртвый код):** L6230-L6231 недостижимы. Тело цикла завершается `status = CMD_COMPACT_R` (L6228), поэтому условие `while (status != CMD_STOP)` (L6214) на следующей итерации всегда истинно; единственный выход из цикла - `return` (L6221 или L6226). Сброс `firstPalletePosition` реально выполняется dispatch-веткой (L3343).
 
 #### Подоперация unload_Pallete() (L5329-L5660), используемая Compact_R
+
 1. `if (fifoLifo) fifoLifo_Inverse()` (L5332-L5333) - переключение inverse в начале; симметричный возврат на большинстве выходов (L5354, L5372, L5460, L5472, L5511, L5569, L5585, L5599, L5638, L5658).
 2. `lifter_Down()` (L5339), `startDiff = 20` при `distance[0] < 90 + chnlOffset` (L5341-L5342).
 3. Подход: `moove_Before_Pallete_R()` при `distance[2] > 750` (L5345-L5348) - подъезд к паллету со стороны начала канала, движением назад.
@@ -1181,17 +1288,20 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 **Факт (утечка inverse):** два пути выхода `unload_Pallete` НЕ возвращают `fifoLifo`-инверсию: abort в цикле дожима (L5410-L5415, `preserveManualStopOnAbort` + return) и WARN_PALLET_SIZE_ERROR (L5432-L5441, return). При включённом `fifoLifo` глобальный `inverse` остаётся =1 после ошибки - фрейм координат последующих операций искажён (mirror `currentPosition = channelLength - currentPosition - 800` в `fifoLifo_Inverse` L4042 не выполняется повторно).
 
 #### Stop/fault/abort
+
 - `shouldAbortLoop()`: после `moove_Forward` (L6190-L6191), в подходе (L6200-L6205: motor_Stop + CMD_STOP), в цикле перестановки (L6222-L6227). `SystemYield()` на каждой итерации (L6198, L6216).
 - `unload_Pallete` на abort-путях использует `preserveManualStopOnAbort()` (L8585-L8590: сохраняет CMD_STOP_MANUAL, иначе CMD_STOP) - в частности L5410-L5415.
 - Faults/warnings - как у Compact_F плюс WARN_PALLET_NOT_FOUND (L5481).
 
 #### Observable outcomes
+
 - `compactCounter` (общий с Compact_F, L6219), `unloadCounter++` (L5656).
 - `firstPalletePosition`: пишется в цикле (L6229), сбрасывается dispatch (L3343).
 - `inverse`: при `fifoLifo` - циклическое переключение на каждый перенос; риск утечки (см. выше).
 - Финал: CMD_STOP/STATE_IDLE как в 0.4/0.5.
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | Шаг подхода 100 мм, 25/25 | L6199 | configured | подъезд к штабелю |
@@ -1204,17 +1314,21 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | `2000000 / maxSpeed` мс | L5453 | configured | таймаут поиска |
 
 #### Resource effects
+
 Аналогично Compact_F; дополнительно: переключение `inverse` не меняет набор шин, но меняет mapping GPIO паллетных сенсоров в `detect_Pallete` (L3408-L3436) и знак скорости в `motor_Speed`/`motor_Stop` (L2113 и др.).
 
 #### Профильные варианты 800/1000/1200
+
 - `dst`: 600/670/500 (L5382-L5387, 500 - только 800 при коротком канале).
 - maxbb `-3` при 1200 (L5395-L5402). Перехват 100/250/450 (L5495-L5499). `-25` к dist для 1000/1200 (L4397).
 
 #### Unknowns
+
 - Смысл пары `status = CMD_COMPACT_R` на L6213 (до цикла) и L6228 (в цикле) - избыточность или артефакт; из source назначение дублирования не устанавливается.
 - Поведение при пустом канале: подход останавливается по `distance[2] >= 700`/отсутствию сенсоров, далее `unload_Pallete` действует по своим warning-путям; явного "nothing to compact" исхода нет.
 
 #### Disposition proposals
+
 - Мёртвый L6230-L6231: **exclude** (поведение уже покрыто сбросом в dispatch L3343).
 - Мёртвый `moove_Forward()` в dispatch (L3345-L3346): **change** - см. Compact_F.
 - Утечка inverse на error-путях unload_Pallete (L5410-L5415, L5432-L5441): **change** - гарантировать идемпотентный возврат кадра координат в V3 (или не переключать inverse на подоперацию).
@@ -1226,14 +1340,17 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 3. CountPallets (CMD_COUNT_PALLETS = 0x27)
 
 #### Entry points и call sites
+
 - Прототип: `L270`. Определение `pallete_Counting_F()`: `L6003-L6135`. Dispatch: `L3313-L3324`, call site `L3315`.
 - Прямо вызываемые: `lifter_Down()` (L6006), `moove_Forward()` (L6009), `detect_Pallete()` (L6010/L6018/L6051/L6086), `get_Distance()` (L6017/L6031/L6050/L6085), `moove_Before_Pallete_R()` (L6021), `motor_Start_Reverse()` (L6032; `L2250-L2258`), `motor_Speed()` (L6033, L6099/L6124), `motor_Stop()` (L6026, L6045, L6094/L6117), `set_Position()` (L6062/L6071/L6132), `blink_Work()` (L6049, L6078), `SystemYield()` (L6041, L6077).
 - В dispatch дополнительно: `moove_Forward()` (L3321) - возврат к началу канала после подсчёта.
 
 #### Admission/preconditions
+
 - Общий путь 0.3; supported на L8376. Аргументов нет. `palleteCount` (глобальный, `L603`) обнуляется в начале функции (L6007).
 
 #### Шаги и переходы (normal path)
+
 1. Лог "Start counting pallete forward..." (L6005), `lifter_Down()` (L6006), `palleteCount = 0` (L6007).
 2. `moove_Forward()` (L6009) - проезд в начало канала; `detect_Pallete()` (L6010).
 3. `palleteOnStart`: если ОБА forward- или ОБА reverse-сенсора сработали в начальной точке - паллет стоит под/у шаттла, `palleteOnStart = 1` (L6011-L6013). Abort-проверка (L6014-L6015).
@@ -1246,15 +1363,18 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 10. Финал (L6131-L6134): `palleteCount = lrint((float)boardCount / 3) + palleteOnStart` - **перезаписывает** инкрементальный `palleteCount` из L6066 (тот использовался только как индекс `palletePosition`); `set_Position()`; `channelLength = currentPosition + shuttleLength`; return.
 
 #### Dispatch-эпилог (L3313-L3324)
+
 После возврата: `status = CMD_STOP; send_Cmd();` (L3316-L3317) -> `status = CMD_COUNT_PALLETS;` (L3318) исключительно ради лог-контекста `makeLog(LOG_INFO, "Pallete count = %d", palleteCount)` (L3319) -> `status = CMD_MOVE_RIGHT_MAN;` (L3320) -> `moove_Forward()` (L3321) - возврат в начало канала -> `status = CMD_STOP; send_Cmd();` (L3322-L3323). Факт: промежуточные присваивания status не влияют на поведение `moove_Forward` кроме лога и ветки `status == CMD_LOAD/CMD_LONG_LOAD` внутри `moove_Forward` (L5247-L5249), которая здесь не срабатывает.
 
 #### Stop/fault/abort
+
 - Внешний контур: abort -> принудительный `status = CMD_STOP` (L6046) - CMD_STOP_MANUAL затирается. Внутренний контур: `preserveManualStopOnAbort()` (L6080) - CMD_STOP_MANUAL сохраняется. Факт асимметрии двух abort-путей одной функции.
 - `SystemYield()` на каждой итерации обоих контуров (L6041, L6077).
 - Отказ сенсора (ToF stale/fault) обрабатывается cross-cutting в `get_Distance`/safety -> `shouldAbortLoop`.
 - Собственных setWarning/setFault у функции нет; warnings/faults возможны только из подфункций (`blink_Work` stall, lifter, ToF).
 
 #### Observable outcomes
+
 - `palleteCount` (L603) - финальное значение; транслируется в каждом пакете телеметрии (`pkt->palleteCount`, L8834) и логируется (L3319).
 - `palletePosition[16]` (L595) - позиции паллет по первой доске каждой тройки; **запись без bounds-check** (L6065-L6066): при > 16 паллетах - выход за пределы массива. Факт.
 - `lifetimePalletsDetected` (L6067, `ShuttleProtocol.h:L280`) - lifetime-счётчик, не сбрасывается.
@@ -1263,6 +1383,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - После dispatch: шаттл в начале канала, `status = CMD_STOP`, `currentOperation = STATE_IDLE`.
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | Скорость прохода 28 | L6033, L6098/L6125 | configured | базовая скорость подсчёта |
@@ -1276,17 +1397,21 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | `boardCount mod 3 == 1` | L6060 | configured | запись позиции паллета |
 
 #### Resource effects
+
 - I2C ToF непрерывно (каждые ~50 мс `get_Distance`), GPIO-сенсоры с `delay(5)` debounce, CAN - скорости ID 100, телеметрия display, лог-буфер. Lifter - один раз вниз (L6006).
 
 #### Профильные варианты 800/1000/1200
+
 - В самой функции различий нет; профиль влияет косвенно через `shuttleLength` в `channelLength = currentPosition + shuttleLength` (L6133) и через `chnlOffset`/`oldSpeed` (configured).
 
 #### Unknowns
+
 - Физический смысл "3 доски на паллет" и надёжность эвристики для нестандартных паллет - из source не устанавливается.
 - Назначение `palletePosition[]` далее не используется нигде в коде (единственная запись - L6065; чтений нет) - артефакт или задел под телеметрию, не устанавливается.
 - Поведение при паллетах, стоящих вплотную (зазор < inter-pallet distance): двойной сенсорный контур должен их разделить, но граница не специфицирована.
 
 #### Disposition proposals
+
 - Эвристика 3 доски/паллет (L6131): **change/unknown** - в V3 подтвердить у заказчика допустимость; при сохранении - задокументировать.
 - `palletePosition` без bounds-check (L6065): **change** - обязательная граница массива.
 - Мёртвое использование `palletePosition` (нет читателей): **unknown** - выяснить, нужна ли позиция паллет в V3.
@@ -1299,14 +1424,17 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 ### 4. Demo (CMD_DEMO = 0x06)
 
 #### Entry points и call sites
+
 - Прототип: `L271`. Определение `demo_Mode()`: `L6693-L6833`. Dispatch: `L3308-L3312`, call site `L3310`.
 - Прямо вызываемые: `lifter_Down()` (L6696), `moove_Reverse()` (L6697), `get_Distance()` (L6701/L6713 и во всех wait-циклах), `detect_Pallete()` (L6702), `moove_Distance_F(100, 25, 25)` (L6707), `motor_Speed()` (L6715/L6717), `load_Pallete()` (L6746), `unload_Pallete()` (L6795), `motor_Stop()` (множественно), `blink_Work()` (во всех wait-циклах), `SystemYield()` (множественно).
 - Косвенно: весь набор из Compact_F и Compact_R (load/unload-подоперации).
 
 #### Admission/preconditions
+
 - Общий путь 0.3; supported на L8360. Аргументов нет.
 
 #### Шаги и переходы
+
 1. Лог "Start DEMO mode..." (L6695), `lifter_Down()` (L6696), `moove_Reverse()` (L6697) - к концу канала, `lastPalletePosition = 0` (L6698), abort-проверка (L6699-L6700).
 2. Подход (L6704-L6719): `while (distance[3] < 700 && distance[1] > 100 + chnlOffset)` - шаги 100 мм вперёд (L6707), как у Compact_F, но БЕЗ условия паллетных сенсоров; флаг `moove = 1` (L6718).
 3. **Внешний бесконечный цикл `while (1)` (L6720)** - фиксируется явно: функция не имеет естественного завершения и крутит load/unload-фазы до stop или fault.
@@ -1320,6 +1448,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 Условия выхода из `while(1)` (исчерпывающе): (а) `shouldAbortLoop()` в любой из ~10 проверок - CMD_STOP/CMD_STOP_MANUAL из UART (через SystemYield) или active fault; (б) `isErrorActive()` после load/unload/в развилках. Других выходов нет; reset/перезагрузка - только через внешний stop или fault.
 
 #### Stop/fault/abort
+
 - Stop: все abort-ветки делают `motor_Stop()` и return; часть дополнительно `status = CMD_STOP` (L6726, L6739, L6771, L6789, L6824) - избыточно при CMD_STOP, но затирает CMD_STOP_MANUAL (в отличие от preserveManualStopOnAbort, который demo_Mode не использует ни разу). Факт.
 - Faults, которые могут latch-иться во время demo (все - через подфункции/cross-cutting, сама demo_Mode не вызывает setFault/setWarning):
   - `FAULT_MOTOR_STALL` (blink_Work L4078-L4085, `ShuttleProtocol.h:L183`);
@@ -1330,11 +1459,13 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Warnings из подопераций (WARN_CHANNEL_FULL, WARN_PALLET_SIZE_ERROR, WARN_OBSTACLE_AHEAD, WARN_PALLET_NOT_FOUND) завершают текущую фазу через `status = CMD_STOP` внутри load/unload_Pallete; demo при этом может завершиться через развилки L6755/L6808 (если расстояние не соответствует штатному окончанию фазы).
 
 #### Display/LED/buzzer
+
 - `blink_Work()` (L4051): GREEN_LED + WHITE_LED мигание (L4088-L4091, L4106-L4111), CAN-drain (L4057), position-report каждые 10 тиков (L4058-L4062), телеметрия на тиках 11/19 (L4119-L4122).
 - `blink_Warning()` (L4134): RED_LED + GREEN_LED + ZOOMER (buzzer) + BOARD_LED, 100 мс on/100 мс off - вызывается только из подопераций при warnings.
 - Demo_Mode напрямую не управляет display-UART; телеметрия идёт через SystemYield/send_Cmd.
 
 #### Observable outcomes
+
 - Бесконечное челночное перемещение штабеля: все паллеты в конец канала (load-фаза), затем все в начало (unload-фаза), повтор.
 - Счётчики: `loadCounter`/`unloadCounter` растут непрерывно; `compactCounter` НЕ растёт (load/unload_Pallete его не трогают).
 - `firstPalletePosition` пишется в unload-фазе (L6796) и сбрасывается (L6805 + dispatch L3311).
@@ -1343,6 +1474,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Логи: "Start DEMO mode...", логи load/unload-подопераций, warning/error-логи подфункций.
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | Подход: `distance[3] < 700`, шаг 100 мм, 25/25 | L6704-L6707 | configured | подъезд к штабелю |
@@ -1354,16 +1486,20 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 | Двойной `SystemYield()` в паузах | L6766-L6767, L6819-L6820 | configured | факт: двойной вызов без комментария |
 
 #### Resource effects
+
 Как у Compact_F + Compact_R суммарно (непрерывно: CAN 100/101, I2C ToF, GPIO-сенсоры, LED/buzzer, телеметрия, лог-буфер). Особенность: неограниченная длительность - watchdog reload и все safety-проверки только через SystemYield; drain обоих UART только там же.
 
 #### Профильные варианты 800/1000/1200
+
 Собственных нет; наследуются от load/unload_Pallete (dst, перехваты, maxbb - см. секции 1-2).
 
 #### Unknowns
+
 - Поведение, если load-фаза не нашла ни одного паллета (пустой канал): `load_Pallete` идёт по warning-путям (WARN_OBSTACLE_AHEAD и т.п.) и ставит `status = CMD_STOP`; demo либо выходит через L6755 (distance[1] > 200), либо продолжает фазы - исход зависит от геометрии, из source однозначно не устанавливается.
 - Назначение двойного `SystemYield()` (L6766-L6767, L6819-L6820) - не устанавливается.
 
 #### Disposition proposals
+
 - Бесконечный цикл с единственным выходом по stop/fault: **preserve** (демо-семантика), но в V3 явно специфицировать exit-контракт.
 - Отсутствие send_Cmd в dispatch (L3308-L3312): **change** - унифицировать телеметрийные ACK-снапшоты.
 - Затирание CMD_STOP_MANUAL в abort-ветках (L6726 и др.): **change** - использовать preserveManualStopOnAbort.
@@ -1382,6 +1518,7 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 - Факт: `fifoLifo` не влияет на выбор направления компакта - режим FIFO/LIFO в V1 реализован только как инверсия кадра координат внутри unload-подопераций (и long_Load/long_Unload, вне scope).
 
 ### 6. Сводка мёртвого кода и ordering-багов группы (факты)
+
 1. `Cntrl_V2/Cntrl_V2.ino:L3335-L3336` - мёртвый `moove_Forward()` (COMPACT_F), присваивание status раньше проверки.
 2. `L3345-L3346` - мёртвый `moove_Forward()` (COMPACT_R), та же транспозиция; эталон живого порядка - L3354-L3356 (LONG_LOAD), L3303-L3305 (CALIBRATE).
 3. `L6230-L6231` - недостижимый хвост `pallete_Compacting_R()` (`firstPalletePosition = 0` после цикла, из которого нет выхода кроме return).
@@ -1396,7 +1533,6 @@ Cross-cutting факты (SystemYield, shouldAbortLoop, ACK-коды, status/cur
 
 ## Группа: Home / Calibrate / Evacuate
 
-
 Источник: локальное зеркало `C:/Projects/Shuttle/ShuttleController`, файлы `Cntrl_V2/Cntrl_V2.ino`, `Cntrl_V2/ShuttleProtocol.h` (plus `git grep` по всем production-файлам `Cntrl_V2/`).
 Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4a226e5` на 1 коммит новее (только `docs/`); все цитируемые исходники идентичны evidence SHA. `docs/Controller-Nonblocking-Refactoring-Plan.md`, `tests/`, refactor-ветки не использовались.
 Все anchors проверены чтением диапазонов. Формат: `файл:L<start>-L<end>`.
@@ -1408,6 +1544,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 ### Home (CMD_HOME = 0x07)
 
 #### Entry points и call sites
+
 - Объявление команды: `CMD_HOME = 0x07` в `enum CmdType`, блок "0x00 Block: Lifecycle & State" (ShuttleProtocol.h:L84, L94).
 - Supported-список: `case CMD_HOME:` в `isSupportedCommand()` (Cntrl_V2.ino:L8351-L8384, кейс на L8361).
 - Приём кадра: `processPacket()` (L2713), ветка `MSG_CMD_SIMPLE || MSG_CMD_WITH_ARG` (L2777-L2780); после всех admission-проверок `sendCommandAck(..., ACK_OK, ...)` и `return reqCmd` (L2855-L2873).
@@ -1419,7 +1556,9 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
   - Отдельного homing-алгоритма и reference-сенсора нет: весь CMD_HOME - это `moove_Forward()`, общий с другими операциями.
 
 #### Admission/preconditions
+
 Путь в `processPacket()` (проверяются последовательно, первое срабатывание отвергает):
+
 1. `isSupportedCommand` - CMD_HOME поддержан (L8361).
 2. Provisioning: `!isProvisionedShuttle() && !isUnprovisionedCommandAllowed(reqCmd)` → `ACK_BAD_ENVIRONMENT` (L2819-L2828); CMD_HOME не входит в `isUnprovisionedCommandAllowed` (L8406-L8409).
 3. Error: `isErrorActive() && !isOverrideCommand(reqCmd)` → `ACK_ERROR_STATE` (L2832-L2841); CMD_HOME не override (L8418-L8423).
@@ -1429,6 +1568,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 Аргументов у команды нет (см. раздел о парсере).
 
 #### Шаги и переходы (normal path)
+
 1. Клиент получает `ACK_OK` (при radio + telem-флаг - `MSG_ACK_TELEM` с override `STATE_HOME` через `predictTelemetryStateForAcceptedCommand`, L2866-L2871, L8271-L8291; `mapCmdToOperation(CMD_HOME) = STATE_HOME`, L8258-L8259, STATE_HOME=17, ShuttleProtocol.h:L164).
 2. `status = CMD_HOME` в SystemYield (L6987/L7018).
 3. loop() IDLE: `currentOperation = STATE_HOME`, лог, `send_Cmd()` (telemetry на display), `currentMode = AUTO_EXEC` (L1843-L1870).
@@ -1447,6 +1587,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 Физический смысл "home" в V1: движение вперёд до задней/передней стены канала, определяемой ToF-расстоянием `distance[1] <= 90 + chnlOffset` мм; позиция принудительно переустанавливается в константу 60. Отдельного homing-алгоритма, концевого выключателя или reference-сенсора нет; используется тот же механизм, что и для любой поездки вперёд.
 
 #### Отличие CMD_HOME от CMD_MOVE_RIGHT_MAN (auto vs manual)
+
 - Общая физика: оба вызывают одну и ту же `moove_Forward()` с одинаковыми условиями выхода (сравнение L3391-L3395 и L3237-L3243). В `moove_Forward` спец-кейс по status есть только для `CMD_LOAD/CMD_LONG_LOAD` (ползание speed=5 при distance>80, L5248-L5249); HOME и MOVE_RIGHT_MAN обрабатываются идентично.
 - Отличия:
   1. Ветка MOVE_RIGHT_MAN в `run_Cmd` содержит дополнительный предварительный `send_Cmd()` (L3239); у HOME его нет (L3391-L3395).
@@ -1455,18 +1596,21 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
   4. В MANUAL-режиме MOVE_RIGHT_MAN выполняется через `moove_Right()` (непрерывное ручное движение, L1913-L1916), а не через `run_Cmd`; HOME в MANUAL-режиме недостижим (отвергается как BUSY, т.к. `isShuttleIdle()` ложен при `status == CMD_MANUAL_MODE`).
 
 #### Stop/fault/abort
+
 - CMD_STOP/CMD_STOP_MANUAL, пришедшие во время движения, обрабатываются в `SystemYield()`: установка `status` + немедленный `motor_Stop()` (L6962-L6974). После этого цикл `moove_Forward` на следующей итерации проходит `shouldAbortLoop()` (L5216) → `preserveManualStopOnAbort()` (L8585-L8592: status=CMD_STOP, кроме CMD_STOP_MANUAL) → `motor_Stop()` → return (L5218-L5220).
 - Любой active fault: `isErrorActive()` (L8593-L8596) → `shouldAbortLoop()` истинен → тот же abort-путь; плюс в `loop()` `currentMode = CoreOpMode::ERROR` (L1819-L1820), где `motor_Force_Stop()` если не остановлен (L2050-L2058).
 - Отказ переднего канального ToF до старта: `motor_Start_Forward` не поднимает `motorStart` (`ensureChannelTofReadyForMotion` → `latchTofMeasurementFault`, L3536-L3553); движение не начинается.
 - `SystemYield` вызывается в каждой итерации цикла движения (L5215); в ветке HOME вне `moove_Forward` его нет (всё выполняется в одном проходе `run_Cmd`).
 
 #### Observable outcomes
+
 - Успех: шаттл у стены канала, `currentPosition = 60` (L5254), `speed = 0`, `status = CMD_STOP`, `currentOperation` после завершения `STATE_IDLE` (L1906); лог "End of channel, stop moove forward..." (L5255); telemetry на display в моменты старта (L1846) и финиша (L3394) с `shuttleStatus = currentOperation` (L8828).
 - Во время выполнения telemetry-состояние `STATE_HOME` (L1843, L8258-L8259).
 - ACK: один `ACK_OK` при приёме (L2871); отдельных ACK начала/конца нет - только display-telemetry.
 - Счётчики/логи: `palleteCount` обновляется `detect_Pallete()` пассивно, операция им не пользуется; предупреждений/фаултов нормальный путь не создаёт.
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | 50 ms | Cntrl_V2.ino:L5224 | configured | период управляющего цикла moove_Forward (ToF+позиция+скорость) |
@@ -1477,6 +1621,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 | ~время доезда до стены | - | inferred | общего deadline у операции нет; длительность = путь/скорость, ограничена только fault/stop |
 
 #### Resource effects
+
 - CAN: команды мотору, TX id=100 в `motor_Speed` (L2088+, `CAN_TX_msg.id = (100)` L2096); дренаж CAN RX в `motor_Speed` (L2093-L2094) и в IDLE-ветке loop (L1877).
 - I2C: ToF-сенсоры через `get_Distance()` (L3857+) каждую итерацию; AS5600 через `set_Position()`/сервис каждые 250 ms (cross-cutting).
 - GPIO: паллетные датчики (`detect_Pallete`, L3406+), CHANNEL-пин (L1829-L1833), светодиоды (`blink_Work`).
@@ -1485,14 +1630,17 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 - Blocking delays внутри цикла движения: отсутствуют (кроме `delay(5)` дебаунса в `detect_Pallete`).
 
 #### Профильные варианты 800/1000/1200
+
 Различий нет: ветвлений по `shuttleLength` в `moove_Forward`, ветке HOME и на пути приёма нет (проверено `grep`; ветвления 800/1000/1200 сосредоточены в load/unload-функциях, напр. L4397, L5383-L5399 - вне scope HOME).
 
 #### Unknowns
+
 - Физический смысл константы `currentPosition = 60` (почему не 0) из source не устанавливается.
 - Какой конец канала считается "home" для клиента (V1 всегда едет только вперёд до стены).
 - Поведение при `lifterUp` с точки зрения клиента (операция завершается перед паллетой, не у стены).
 
 #### Disposition proposals (только предложения)
+
 - preserve: приём только из idle, проверка in-channel, ACK_BUSY/ACK_ERROR_STATE/ACK_BAD_ENVIRONMENT - согласованы с уже задуманной V3-моделью admission.
 - change: "home" как простая поездка вперёд до стены без отдельного homing-семантика - для V3 стоит явно определить, что означает HOME (поездка к стене vs позиция-референс), т.к. V1-поведение самостоятельной семантики не несёт.
 - change: принудительная установка `currentPosition = 60` магией - заменить на обоснованный референс либо исключить.
@@ -1504,10 +1652,12 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 ### Calibrate (CMD_CALIBRATE = 0x16)
 
 #### Entry points и call sites
+
 - Объявление: `CMD_CALIBRATE = 0x16`, блок "0x10 Block: Core Movement" (ShuttleProtocol.h:L103).
 - Supported-список: `case CMD_CALIBRATE:` (Cntrl_V2.ino:L8368) в `isSupportedCommand` (L8351-L8384).
 - Dispatch: ветка `run_Cmd` (L3298-L3307):
-  ```
+
+  ```cpp
   send_Cmd();
   calibrate_Encoder_F();
   calibrate_Encoder_R();
@@ -1516,13 +1666,16 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
   status = CMD_STOP;
   send_Cmd();
   ```
+
 - Telemetry-состояние: `STATE_CALIBRATE = 18` (ShuttleProtocol.h:L165), mapping L8260-L8261.
 - Вызываемые физические функции: `calibrate_Encoder_F()` (L7342-L7455), `calibrate_Encoder_R()` (L7229-L7339), финальный `moove_Forward()` (L5197-L5265); внутри них: `moove_Distance_R(2000)` (вызов L7363; обёртка L4997-L5001; полная L5004-L5194), `moove_Forward()` (вызов L7245), `readAs5600AngleFresh()` (L1071-L1093), `motor_Start_Forward/Reverse` (L2239+), `motor_Speed(5)`, `SystemYield()`, `blink_Work()`.
 
 #### Admission/preconditions
+
 Идентичны HOME (подраздел "Admission" выше): supported (L8368), provisioning (L2819-L2828), не в error (L2832-L2841), in-channel (L2843-L2853), только из idle (`canAcceptCommandNow` → `isShuttleIdle()`, L8462). Аргумент игнорируется даже при `MSG_CMD_WITH_ARG` (L2857-L2864 - arg читаются только для manual-distance и LONG_UNLOAD_QTY).
 
 #### Шаги и переходы (normal path)
+
 1. `ACK_OK` (L2871), `status = CMD_CALIBRATE`, `currentOperation = STATE_CALIBRATE`, AUTO_EXEC (L1843-L1870).
 2. `run_Cmd`: `send_Cmd()` (L3300) - telemetry STATE_CALIBRATE на display.
 3. **calibrate_Encoder_F()** (L7342-L7455):
@@ -1548,18 +1701,22 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 Взаимодействие с maxSpeed/minSpeed: sampling-фазы используют логическую скорость 5, но `motor_Speed` преобразует её через глобальные `minSpeed`/`maxSpeed` (`hexSpeed.vint = minSpeed + oldSpeed * maxSpeed / 100 + ...`, L2088-L2113) - фактический выход мотора зависит от конфигурации; разгон `moove_Distance_R(2000)` параметрически 100/10 (L4999), но тот же `motor_Speed` дополнительно клапит рост скорости (L2099-L2102).
 
 #### Сохранение результата
+
 - Результат пишется в runtime-массивы `calibrateEncoder_F/R` (глобальные, L569-L574) и в `eepromData.calibrateEncoder_F/R` (поля L481-L482) - L7452, L7336.
 - Автоматического сохранения во flash НЕТ: `pendingEepromSave` калибровкой не устанавливается (все установки: L2790 CMD_SAVE_EEPROM, L2935/L3069 config-set). Для персистентности клиент должен послать `CMD_SAVE_EEPROM` (0x30): парсер ставит `pendingEepromSave = true` и ACK_OK (L2788-L2793), запись выполняется в `loop()` только в покое `motorStart == 0 && motorReverse == 2` (L1811-L1815) через `saveConfigsToFlash()` (L7485-L7560; защита от записи в движении L7487-L7491 "FATAL: Blocked Flash Erase while moving!").
 - КРИТИЧНЫЙ ФАКТ: при загрузке конфигурации из flash восстановление runtime-массивов ЗАКОММЕНТИРОВАНО (L7612-L7615):
-  ```
+
+  ```cpp
   /*for (uint8_t i = 0; i < 8; i++) {
     calibrateEncoder_F[i] = eepromData.calibrateEncoder_F[i];
     calibrateEncoder_R[i] = eepromData.calibrateEncoder_R[i];
   }*/
   ```
+
   Поэтому после reboot позиционирование всегда использует дефолт `{40,40,...}` (L569-L574), а не сохранённую калибровку; персистентные значения существуют только в `eepromData` (раунд-трип load/save, L7472, L7497-L7498) и не влияют на движение до повторного CMD_CALIBRATE. Дефолт `eepromData` при этом вычисляется как `lrint(weelDia * 3.4 / 8)` (L7576-L7580) - другое число, чем runtime-дефолт 40.
 
 #### Stop/fault/abort
+
 - CMD_STOP/STOP_MANUAL: каждый цикл калибровки содержит `SystemYield()` (дренаж команд, L6950/L6954) и `shouldAbortLoop()`:
   - moove_Distance_R: L5044-L5049 (`preserveManualStopOnAbort` + стоп);
   - zero-seek F/R: L7382-L7386, L7267-L7271 (`motor_Stop(); return;` без preserveManualStopOnAbort - status уже изменён самим SystemYield);
@@ -1569,6 +1726,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 - При отказе AS5600 в calibrate_Encoder_F (L7369-L7373) `status` остаётся CMD_CALIBRATE → dispatch продолжает R-фазу и финальный moove_Forward (см. выше).
 
 #### Observable outcomes
+
 - Успех: оба массива по 8 значений пересчитаны (единицы - мм сегмента, формула L7450/L7334), записаны в `eepromData` (без flash), шаттл у конца канала после финального `moove_Forward`, `currentPosition = 60`, `status = CMD_STOP`, `currentOperation = STATE_IDLE` после выхода из AUTO_EXEC (L1906).
 - Логи: "Start calibrating encoder to Forward/Reverse" (LOG_INFO, L7344/L7231), дамп текущих массивов (LOG_DEBUG, L7346-L7354), "Calibrate_F data:"/"Calibrate_R data:" (LOG_DEBUG, L7454/L7338), лог moove-функций.
 - Telemetry: STATE_CALIBRATE на время выполнения (L1843/L8260-L8261), ACK_OK один при приёме.
@@ -1576,6 +1734,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 - Побочный эффект: `inverse` сбрасывается в 0 (L7240, L7358) и в runtime не восстанавливается - до перезагрузки шаттл работает в неинвертированной ориентации датчиков даже при `eepromData.inverse == 1`.
 
 #### Timing conditions
+
 | Значение | Anchor | Класс | Смысл |
 |---|---|---|---|
 | 30000 ms | Cntrl_V2.ino:L7272, L7387 | configured | timeout zero-seek фазы (R и F) до FAULT_MOVE_TIMEOUT |
@@ -1592,6 +1751,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 | ~2×(30 s+120 s)+переезды | - | inferred | верхняя оценка длительности при худших таймаутах; типовая длительность из source не устанавливается |
 
 #### Resource effects
+
 - I2C: интенсивный опрос AS5600 (каждая итерация zero-seek/sampling, L7285/L7312/L7398/L7427), ToF через get_Distance в moove-функциях.
 - CAN: motor_Speed(5)/ramp в moove-функциях (id=100).
 - GPIO: detect_Pallete внутри moove_Forward/moove_Distance_R, blink_Work, CHANNEL.
@@ -1600,15 +1760,18 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 - Blocking delays: `delay(3)` на каждой sampling-итерации (L7306, L7421), `delay(50)` (L7355), `delay(5)` в detect_Pallete.
 
 #### Профильные варианты 800/1000/1200
+
 Различий нет: в calibrate_Encoder_F/R, moove_Distance_R и dispatch CMD_CALIBRATE ветвлений по `shuttleLength` нет (`shuttleLength` в moove_Distance_R используется только в формуле channelLength у стены канала, L5152, одинаково для всех профилей).
 
 #### Unknowns
+
 - Физический смысл нормализующей формулы `lrint(weelDia*3.2/8 + t_i*weelDia*3.2/summ)/2` (коэффициенты 3.2 и деление /2) из source не объясняется.
 - Причина, по которой восстановление калибровки из flash закомментировано (L7612-L7615) - баг или намеренное решение - не устанавливается.
 - Почему `inverse` не восстанавливается после калибровки.
 - Требования к среде (пустой канал, груз) для валидности калибровки из source не следуют.
 
 #### Disposition proposals (только предложения)
+
 - preserve: двухфазная структура F+R с 8×512-сегментной моделью - согласуется с существующей моделью позиционирования (L3922-L4034).
 - preserve: таймауты 30 s/120 s как fault-границы фаз.
 - change: отсутствие автосохранения (CMD_SAVE_EEPROM обязателен) и закомментированное восстановление - в V3 персистентность калибровки должна работать end-to-end, иначе операция бесполезна между перезагрузками.
@@ -1624,10 +1787,12 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 **Вывод: V1 содержит только enum/evidence без production behavior - ПОДТВЕРЖДЕНО строго по source.**
 
 Полный перечень всех мест встречи "evacuate" (case-insensitive) во всех production-файлах (`git grep -in evacuate -- Cntrl_V2/`, файлы: AlertManager.h, As5600HealthMonitor.h, As5600Sensor.cpp/.h, BmsDdA5.hpp, BmsDdA5FirmwareAdapter.hpp, Cntrl_V2.ino, E22Radio.hpp, ShuttleProtocol.h, TOF_Sense.cpp/.h, TofBusMonitor.h, TofHealthMonitor.cpp/.h, hal_conf_extra.h):
+
 1. `CMD_EVACUATE_ON = 0x28,` - ShuttleProtocol.h:L114 (объявление в `enum CmdType`, комментарий блока "0x20 Block: Auto Operations").
 2. `STATE_EVACUATE = 5,` - ShuttleProtocol.h:L152 (объявление в `enum ShuttleState`).
 
 Ничего больше нет. В частности:
+
 - (b) Supported-список: `isSupportedCommand()` (Cntrl_V2.ino:L8351-L8384) НЕ содержит `CMD_EVACUATE_ON` - switch перечисляет CMD_STOP..CMD_FIRMWARE_UPDATE, `default: return false;` (L8381-L8382).
 - (c) Call sites: 0 в `.ino` и во всех остальных production-файлах; `STATE_EVACUATE` в `.ino` не встречается ни разу (grep по Cntrl_V2.ino - только ShuttleProtocol.h:L114 и L152).
 - (d) Точный путь отвержения: кадр `MSG_CMD_SIMPLE`/`MSG_CMD_WITH_ARG` с cmdType=0x28 → `processPacket()` (L2713) → ветка L2777-L2780 извлекает `reqCmd` → `if (!isSupportedCommand(reqCmd))` (L2782) → `sendCommandAck(header->seq, ACK_REJECTED, replyPort, requiresNoAck, useTelemAck); return NO_NEW_CMD;` (L2784-L2785). Определение `sendCommandAck` L2697-L2711: при `suppressAck` (флаг NO_ACK в msgID) ответ не отправляется; при radio + telem-флаг шлётся `MSG_ACK_TELEM` (L2662-L2695), иначе `MSG_ACK` (L2632-L2660). Клиент получает `AckResult = ACK_REJECTED = 1` ("Generic rejection (reserved)", ShuttleProtocol.h:L139). `status` и `currentOperation` не изменяются, команда дальше парсера не проходит.
@@ -1636,6 +1801,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 Мёртвый код: оба объявления (ShuttleProtocol.h:L114, L152) - зарезервированные идентификаторы без реализации; ветка отвержения L2782-L2786 - единственный production-путь, связанный с командой.
 
 #### Disposition proposals (только предложения)
+
 - unknown/owner-decision: семантика EVACUATE в V3 не может быть выведена из V1 (нет ни поведения, ни описания в source); если операция нужна - её спецификация создаётся с нуля, если нет - enum-значения можно исключить из протокола V3 либо сохранить как reserved.
 - preserve (только как факт протокола): значения 0x28 и STATE=5 зафиксированы в wire-совместимом enum; любое переиспользование этих кодов в V3 сломает совместимость с клиентами, ожидающими ACK_REJECTED.
 

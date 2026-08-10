@@ -16,7 +16,7 @@
 
 ### 1.2 Каталог (first pass, draft для item 5)
 
-Каталог построен из V1-свидетельств (индекс, commit `a7f927c`, ветка `research/v1-system-evidence`) и walkthrough operating contexts (issue 2) × интерфейсы. Требует ревью при формировании пакета (G2).
+Каталог построен из V1-свидетельств (индекс, ветка `research/v1-system-evidence`) и walkthrough operating contexts (issue 2) × интерфейсы. Требует ревью при формировании пакета (G2).
 
 | HZ | Класс (context × interface) | Причинная цепочка | Вред | Нач. риск | Детекция | Controls | Safe state | Реакция | Recovery | Ост. риск | Verification | Acceptance |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -197,6 +197,6 @@ Initializing → Ready ↔ Degraded → Fault
 - «Определить архитектурные границы и ownership foundation V3» (#43), `docs/software-architecture-boundaries-v3.md`.
 - «Выбрать execution architecture V3 по Gates + evidence» (#10).
 - «Определить system context и таксономию возможностей V3» (#2), `CONTEXT.md`.
-- Системный индекс свидетельств V1 (commit `a7f927c`, ветка `research/v1-system-evidence`).
+- Системный индекс свидетельств V1 (ветка `research/v1-system-evidence`).
 - «Определить структуру нормативного пакета и verification gates» (#8) — item 5, G2.
 - Алгоритмическая документация (#16, #30–42) — per-operation доменные алгоритмы.
