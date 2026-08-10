@@ -161,14 +161,21 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
   1. Физически у контроллера один bridge ingress; multiplex downstream TCP/UI клиентов делает **provisioned bridge** (доверенный peer channel-trust), не контроллер.
   2. Bridge **обязан** на hello и на **каждом** последующем principal-scoped кадре (mutating Control/Service/Update/Session, handshake refresh) ставить **`bridgePrincipalHandle`** (u16) в transport/header envelope (не «только payload по желанию клиента»).
   3. Handle opaque; bridge ассоциирует 1:1 с одним своим authenticated/authorized downstream client. Поле авторитетно **только** потому что кадр пришёл на effective `network_bridge` ingress от provisioned bridge. **Не** credential конечного пользователя; **не** действительно на radio.
-  4. Hello: controller map `(bridgeEndpointId, bridgePrincipalHandle) → authorityId` (+ grant). Новый handle → allocate `authorityId` если budget не исчерпан; иначе reject. Повтор hello с тем же handle в epoch → тот же `authorityId`.
-  5. **Post-handshake invariant (anti cross-principal spoof):**
+  4. Hello: controller map `(bridgeEndpointId, bridgePrincipalHandle) → authorityId` (+ grant). Первый hello handle в epoch → allocate `authorityId` если budget не исчерпан; иначе reject. Повтор hello с тем же handle в **том же** `controllerEpoch` → **тот же** `authorityId` и тот же principal (re-bind/refresh grant allowed; ledger identity unchanged).
+  5. **Handle lifetime / no-reassign (epoch-scoped):**
+     - В пределах одного `controllerEpoch` значение `bridgePrincipalHandle` на данном `bridgeEndpointId` является **стабильным ключом principal** и **не может быть переназначено** другому downstream-клиенту/principal.
+     - Disconnect downstream **не** освобождает handle для reuse другим клиентом до смены epoch. Bridge MAY keep using the same handle only for the **same** logical downstream client on reconnect; a **different** client MUST receive a handle value **never used** on this bridge endpoint in the current epoch.
+     - Optional `PrincipalRetire(handle)` (Service/Control) may mark principal idle and drop live session/subs; it does **not** free the handle value for a new principal in-epoch (handle remains burned until epoch change).
+     - On `controllerEpoch` change controller **clears** handle→authorityId map and ledgers; handles may be issued fresh.
+     - Exhaustion of unused handle/authority budget in epoch → reject `BusyRejected` (numbers → #48).
+  6. **Post-handshake invariant (anti cross-principal spoof):**
      - Controller resolves `resolvedAuthorityId = map(bridgeEndpoint, handle)` from the frame handle.
      - Unknown/unmapped handle → reject `Unauthorized` / `HandshakeRequired`.
      - Payload may **echo** `authorityId` for client correlation; if present and `≠ resolvedAuthorityId` → reject `Unauthorized` (client A cannot act as client B by stuffing B's id).
      - Controller admission, idempotency ledger, grants use **resolvedAuthorityId only**.
-  6. **Bridge obligation:** for each downstream connection the bridge MUST (a) fix one handle for that connection after its auth, (b) stamp that handle on every principal-scoped frame to the controller, (c) **rewrite or drop** any client-supplied attempt to present another connection's `authorityId`/handle before forwarding. Failure of (b)/(c) is a bridge defect; controller still enforces (5).
-  7. Смена handle = смена principal (нужен handshake/grant для нового handle). `endpointInstanceHint` **никогда** не участвует в map.
+  7. **Bridge obligation:** for each downstream connection the bridge MUST (a) allocate a handle obeying no-reassign-in-epoch, (b) fix that handle for the connection after its auth, (c) stamp it on every principal-scoped frame, (d) **rewrite or drop** any client-supplied attempt to present another connection's `authorityId`/handle, (e) on disconnect either reconnect same client with same handle or assign a fresh never-used-in-epoch handle to a new client — never silently repoint an in-epoch handle at a different client. Failure of (c)/(d)/(e) is a bridge defect; controller still enforces (5)/(6).
+  8. Смена handle = смена principal (нужен handshake/grant для нового handle). `endpointInstanceHint` **никогда** не участвует в map.
+
 - Заявленные role/capability fields — только **requests**. Grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports. Вне grant → `Unauthorized` / `RoleEscalation`.
 - Отсутствие crypto session на wire **не** означает self-asserted authority.
 
@@ -408,7 +415,7 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 11. No hidden semantics checklist (G3 item): external client with registries+schema alone can decode admissions, outcomes, faults.  
 12. Authority binding: principal resolved from ingress (+ handle on bridge), never from client-chosen `authorityId` alone; payload id is echo; mismatch with resolved → `Unauthorized`.  
 13. **Impersonation / claimed-role escalation:** request with role or capability outside handshake grant → `RoleEscalation`/`Unauthorized`; endpoint/profile alone never implies Update Authority without grant.  
-14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) handle on radio → reject; (e) missing handle on bridge hello or principal-scoped frame → reject; (f) **cross-principal spoof:** after handshakes for A and B, frame with handle=A but payload authorityId=B → reject; frame with handle=B stamped by bridge for connection A must not be producible if bridge enforces bind — controller still rejects unknown handle/grant mismatch.  
+14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) handle on radio → reject; (e) missing handle on bridge hello or principal-scoped frame → reject; (f) **cross-principal spoof:** handle=A + payload authorityId=B → reject; (g) **handle lifetime:** after H→authorityA, disconnect, reconnect **same** client with H → still authorityA; (h) **no reassign:** bridge must not map H to a different client in-epoch — controller continues treating H as authorityA for entire epoch (burned handle); new client requires unused handle; epoch change clears map.  
 15. **Profile spoofing:** frame on radio ingress with `expectedProfileId=network_bridge` → `ProfileMismatch` / no network_bridge privileges; UpdateBegin on radio ingress → `ProfileDenied` regardless of claimed expected profile.
 
 
