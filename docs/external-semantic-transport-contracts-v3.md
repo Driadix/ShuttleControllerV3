@@ -165,7 +165,6 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
   5. **Handle lifetime / no-reassign (epoch-scoped):**
      - В пределах одного `controllerEpoch` значение `bridgePrincipalHandle` на данном `bridgeEndpointId` является **стабильным ключом principal** и **не может быть переназначено** другому downstream-клиенту/principal.
      - Disconnect downstream **не** освобождает handle для reuse другим клиентом до смены epoch. Bridge MAY keep using the same handle only for the **same** logical downstream client on reconnect; a **different** client MUST receive a handle value **never used** on this bridge endpoint in the current epoch.
-     - Optional `PrincipalRetire(handle)` (Service/Control) may mark principal idle and drop live session/subs; it does **not** free the handle value for a new principal in-epoch (handle remains burned until epoch change).
      - On `controllerEpoch` change controller **clears** handle→authorityId map and ledgers; handles may be issued fresh.
      - Exhaustion of unused handle/authority budget in epoch → reject `BusyRejected` (numbers → #48).
   6. **Post-handshake invariant (anti cross-principal spoof):**
