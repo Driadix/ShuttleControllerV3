@@ -99,7 +99,7 @@
 ### Watchdog
 
 - Reload - обязанность execution core на каждой границе bounded-шага и в idle-loop; health-агрегация - Safety Authority; hardware - HAL watchdog adapter.
-- Формула окна (item 9): окно = max(худший bounded шаг, flash-окно, ISR-время) + margin. Единица V1-аргумента watchdog API - Unknown, требует подтверждения.
+- Формула окна (item 9): окно = max(худший bounded шаг, flash-окно, ISR-время) + margin. Единица V1-аргумента watchdog API подтверждена (IWatchdog, µs; V1 `10000000` = 10 s, #45 §7.1); числовое окно — item 9 (#48): 10 s.
 
 ### Время
 
