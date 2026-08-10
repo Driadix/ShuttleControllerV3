@@ -4,7 +4,7 @@
 
 Формат документа задан [«Формат алгоритмической документации операций V3»](./algorithmic-documentation-format-v3.md): 12-раздельный каркас, трёхслойное разделение содержание/evidence/структура, narrative на русском языке без формул и чисел, идентификаторы - на английском. Общая рамка admission, ownership, надзора, прерываний и публикации outcomes задана [«Глобальной алгоритмической документацией работы шаттла V3»](./global-algorithmic-documentation-v3.md); lifecycle, identity, admission и idempotency заданы [«Общим semantic contract операций V3»](./semantic-contract-v3.md).
 
-Evidence: [Capability Evidence Slices каталога операций V3](https://github.com/Driadix/ShuttleControllerV3/blob/research/v3-capability-evidence-slices/docs/research/v3-capability-evidence-slices.md) (ветка `research/v3-capability-evidence-slices`), раздел «Группа: LongLoad / LongUnload / LongUnloadQuantity» - секции «LongLoad (CMD_LONG_LOAD = 0x22)», «Условия остановки циклов (ключевой инвариант)», «Флаг longWork», «FIFO/LIFO»; канонический snapshot V1 - `Driadix/ShuttleController@708d090`. Далее ссылки вида «bundle, …» указывают на этот документ.
+Evidence: [Capability Evidence Slices каталога операций V3](./research/v3-capability-evidence-slices.md), раздел «Группа: LongLoad / LongUnload / LongUnloadQuantity» - секции «LongLoad (CMD_LONG_LOAD = 0x22)», «Условия остановки циклов (ключевой инвариант)», «Флаг longWork», «FIFO/LIFO»; канонический snapshot V1 - `Driadix/ShuttleController@708d090`. Далее ссылки вида «bundle, …» указывают на этот документ.
 
 ## 1. Identity и назначение
 

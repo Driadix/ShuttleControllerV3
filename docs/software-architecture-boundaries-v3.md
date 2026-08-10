@@ -185,6 +185,6 @@
 
 - Тикет «Определить архитектурные границы и ownership foundation V3» (#43) и его resolution-комментарии, включая независимое экспертное ревью.
 - Тикет «Выбрать execution architecture V3 по Gates + evidence» (#10).
-- Системный индекс свидетельств V1 (ветка `research/v1-system-evidence`, `docs/research/v1-system-evidence-index.md`).
+- Системный индекс свидетельств V1 (commit `a7f927c`, ветка `research/v1-system-evidence`, `docs/research/v1-system-evidence-index.md`).
 - `CONTEXT.md` - канонические термины.
 - Тикет «Определить структуру нормативного пакета и verification gates» (#8) - logical item 10.
