@@ -17,7 +17,7 @@ Lifecycle моделируется **шестью независимыми ос�
 
 ## 2. Платформенное окно (владелец: execution core)
 
-```
+```text
 Boot → Serving → Update → Serving | Recovery → Serving | Boot
 (любое окно) → Boot        (reset: watchdog / HardFault / power-cycle / ручной restart)
 ```
@@ -34,7 +34,7 @@ Boot → Serving → Update → Serving | Recovery → Serving | Boot
 Переходы (guards):
 
 | Переход | Guard |
-|---|---|
+| --- | --- |
 | `Boot → Serving` | инициализация адаптеров завершена, epoch выдан, watchdog armed |
 | `Serving → Update` | запрос Update Authority, admission: слот свободен, stationary (INV-UPDATE-STATIONARY), health ∈ {Ready, Degraded} |
 | `Update → Serving` | update-ось в терминале `Committed`, `RolledBack` **или `Aborted`** |
@@ -44,7 +44,7 @@ Boot → Serving → Update → Serving | Recovery → Serving | Boot
 
 ## 3. Provisioning-ось (identity + motion-relevant persisted-конфигурация)
 
-```
+```text
 Unprovisioned → Provisioning → Provisioned
 Provisioned → Provisioning        (re-provisioning)
 ```
@@ -56,7 +56,7 @@ Provisioned → Provisioning        (re-provisioning)
 Переходы (guards; атомарность — HZ-14 journal, владелец Persistence adapter):
 
 | Переход | Guard / правило |
-|---|---|
+| --- | --- |
 | `Unprovisioned → Provisioning` | авторизованная provisioning-операция (Service Client) |
 | `Provisioning → Provisioned` | полная валидация (профиль + конфигурация + identity) успешна; новая journal-запись закоммичена |
 | `Provisioning → Unprovisioned` | initial provisioning: abort/валидация не прошла/power-cut — rollback-таргета нет, defaults |
@@ -70,7 +70,7 @@ Guard перехода провала — предикат «существуе�
 
 ## 4. Operation lifecycle (решён #13, фиксируется)
 
-```
+```text
 Accepted → Running → Succeeded
 Running → Stopping → Cancelled
 Running → Failed
@@ -89,7 +89,7 @@ Stopping → Failed
 
 ## 6. Session-ось (Manual Control Session; владелец: Manual Session)
 
-```
+```text
 Closed → Opening → Active → Closing → Closed
 Opening → Closed        (admission-отказ)
 Active → Closing        (lease expiry / link loss / явное закрытие / stop intent / latched fault)
@@ -103,7 +103,7 @@ Active → Closing        (lease expiry / link loss / явное закрыти�
 
 ## 7. Update-ось (владелец: Update Authority + Persistence adapter)
 
-```
+```text
 Idle → Staging → Applying → Committed | RolledBack | Failed
 Staging → Aborted            (abort / отказ валидации / latched fault)
 Aborted → Idle               (по завершении handoff окна либо при старте нового update)
@@ -125,7 +125,7 @@ Failed → Recovering → Committed | Failed
 Один эксклюзивный слот (I-LC-4); занятый слот → `ResourceConflict`; порядок проверок: окно → health → provisioning → эксклюзив → preconditions типа (#13). Safety intents не гейтятся и никогда не отклоняются (воронка, #45). Каждый класс разбит на start guard (admission) и active invariant.
 
 | Класс | Start guard | Active invariant |
-|---|---|---|
+| --- | --- | --- |
 | Motion-операция (auto, root) | Serving, Ready/Degraded (capability-ограничения, ≤1.0 м/с в Degraded), Provisioned, слот свободен | слот занят; окно Serving; Fault → stop по #45; terminal outcome → слот освобождён |
 | Manual-сессия (normal) | Serving, Ready/Degraded, Provisioned, слот свободен | слот занят; INV-LEASE-STOP |
 | Recovery-jog | Serving, Fault, Provisioned, авторизация Safety Authority, слот свободен | слот занят (сессия); границы item 4 |
@@ -138,7 +138,7 @@ Failed → Recovering → Committed | Failed
 ## 9. Restart-таблица (что переживает reboot)
 
 | Сущность | Переживает reboot | Механика |
-|---|---|---|
+| --- | --- | --- |
 | Платформенное окно | нет → всегда `Boot → Serving` | runtime |
 | Health | условно: crash-class marker → `Fault` (reconciliation reset-cause); иначе `Initializing → Ready/Degraded` | Backup SRAM: marker + breadcrumbs + crash counter (#45 Q5 A) |
 | Provisioning (identity + конфигурация) | да, атомарно: power-cut mid-write → rollback к committed; повреждение journal → Unprovisioned + Degraded | journal + CRC (HZ-14) |
@@ -155,7 +155,7 @@ Failed → Recovering → Committed | Failed
 ## 10. Взаимодействия осей (детерминизм и edge-cases)
 
 | Комбинация | Правило |
-|---|---|
+| --- | --- |
 | Fault в любой момент | активные operations → `Stopping/Failed`; сессия → `Closing`; update в `Staging` → discard stage-области → `Aborted`, окно `Update → Serving` (health Fault — motion закрыт, read-only доступна; активный образ не тронут); update в `Applying` невозможен с Fault (quiescence требует Ready/Degraded, вход — ¬Fault); **для остальных классов окно не меняется** |
 | Fault во время `Provisioning` | текущий bounded-этап записи завершается атомарно до границы шага; переход оси определяется только journal (CRC/committed snapshot), не health-осью; health обрабатывается отдельно; движение остаётся закрытым |
 | Degraded при активной сессии | сессия продолжается, движение ограничено потолком ≤ 1.0 м/с + capability-ограничениями; stop-профили по #45 |

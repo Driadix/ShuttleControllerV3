@@ -19,7 +19,7 @@
 Каталог построен из V1-свидетельств (индекс, ветка `research/v1-system-evidence`) и walkthrough operating contexts (issue 2) × интерфейсы. Требует ревью при формировании пакета (G2).
 
 | HZ | Класс (context × interface) | Причинная цепочка | Вред | Нач. риск | Детекция | Controls | Safe state | Реакция | Recovery | Ост. риск | Verification | Acceptance |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | HZ-01 | normal auto, manual × Sensing (ToF) | потеря направленной сенсорики в движении → возраст образца > T_fresh | столкновение с паллетой/стойкой; контакт с человеком | H (severity) × L (likelihood); confidence: low — нет полевых данных | freshness (T_fresh, каркас C1) | каденция ≤ T_sample_worst; T_fresh по C1b; INV-SENSING-FRESH | Stop | IMMEDIATE + fault (directional ToF) | qualified auto-clear (stationary + streak) | полный путь C1 — **open-obligation: измерение цепочки (T_check_jitter, T_arb, T_emit) и D_brake — #54**; решение C1b принято (#48: D_accept 1.0 м); `v×T_fresh` ≈ 0.3–0.5 м при типовой скорости; bumper — физический backstop (**защита объекта/груза, F2**; человек — внешняя граница доступа) | proving #1; host: staleness-логика | owner (accepted O3 — T_fresh 300 ms; C1b разрешён: D_accept 1.0 м, #48) |
 | HZ-02 | все motion-контексты × GPIO bumper, CAN | контакт с препятствием/человеком → bumper edge → ISR ring → latch | травма человека; повреждение шаттла/груза | H | bumper ISR (falling edges), crash counter | force-stop (min extended ID + выделенный mailbox, вне очередей); D_accept ограничивает энергию контакта | Stop (force-stop) | FORCE-STOP + latch + crash counter | explicit reset (persisted marker, Q5 A) | контакт на скорости, ограниченной D_accept; энергия контакта не измерена; человек — внешняя граница доступа (F2) | proving #3, #13; host: latch | owner |
 | HZ-03 | все motion-контексты × CAN (100/101), приводы | отказ CAN-шины/драйвера → команды не доходят | неуправляемое движение | H (до мер; закрыт Q7.1 A) | CAN error states, отсутствие статусных RX (детали — Q7) | **per-device commissioning-тест fail-safe приводов (Q7.1 A)** + firmware-смягчение (error counters, bus-off recovery, stop при error passive) | Stop | FORCE-STOP (Q4-маппинг) | явный reset после проверки шины | **M — до фиксации ручного ре-теста в плане ТО, затем L** (F6; в firmware не контролируется) | proving #13; commissioning-процедура + периодический ручной ре-тест fail-safe (#50/#52) | owner (mitigated, Q7.1 A + F6) |
@@ -41,7 +41,7 @@
 ### 1.3 Disposition V1-таксономии (evidence)
 
 | V1-бит | Disposition | Основание |
-|---|---|---|
+| --- | --- | --- |
 | FAULT_TOF_* (4), FAULT_AS5600 | keep | HZ-01/HZ-05, qualified recovery (Q5) |
 | FAULT_BUMPER_* (4) | keep | HZ-02, explicit reset + persisted marker (Q5 A) |
 | FAULT_LIFTER_TIMEOUT | keep | HZ-07 |
@@ -62,7 +62,7 @@ Authority остаточных рисков — **владелец, через G
 
 Состояния — health-ось Safety Authority (issue 2: `Error` — health condition, не глобальный mode):
 
-```
+```text
 Initializing → Ready ↔ Degraded → Fault
 ```
 
@@ -78,7 +78,7 @@ Initializing → Ready ↔ Degraded → Fault
 Форма: `INV-<имя>: proposition (над snapshot'ами) ⇒ требование` + deadline-параметр (значения — каркас раздела 6 / #48) + verification obligation. Все инварианты проверяемы на host.
 
 | Инвариант | Правило | Источник |
-|---|---|---|
+| --- | --- | --- |
 | INV-SENSING-FRESH | commanded motion ⇒ направленная сенсорика свежа (до старта и в движении); `sensorOff` исключён | V1 keep; drop sensorOff |
 | INV-FAULT-ADMISSION | latched fault ⇒ внешние operation/manual intents отклонены; только авторизованные safety/stop/recovery | V1 keep (формализация) |
 | INV-BUMPER-FORCE-STOP | bumper ⇒ force-stop в пределах дедлайна + latch + crash counter | V1 keep |
@@ -106,7 +106,7 @@ Initializing → Ready ↔ Degraded → Fault
 Три stop-профиля: `CONTROLLED` (ramp, bounded rate), `IMMEDIATE` (нулевой кадр в следующую эмиссию), `FORCE-STOP` (extended min-ID кадр + нулевой кадр).
 
 | Триггер | Профиль | Источник |
-|---|---|---|
+| --- | --- | --- |
 | Штатное завершение операции, внешняя stop-команда, end-of-channel | CONTROLLED | V1 keep |
 | Manual lease expiry (единый lease V3) | CONTROLLED (bounded) | V1 keep, асимметрия display/radio снята |
 | Fault в покое (lifter timeout, AS5600, I2C recovery, move timeout в покое) | CONTROLLED | V1 keep |
@@ -160,7 +160,7 @@ Initializing → Ready ↔ Degraded → Fault
 Источники: ST DS8626 Rev 12 (March 2026) Table 40 (§6.3.12), RM0090 Rev 22 (§3.6, §32, §21, Table 107), Arduino_Core_STM32 @ bb4b804b (IWatchdog). Верифицировано субагентом-исследователем (первичные документы, не по памяти).
 
 | Величина | Значение (worst case) | Источник | Max/typ | Confidence |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Erase 128 KB сектора (sector 7, V1-журнал) | **4 s** (PSIZE=x8); 2.6 s (x16); **2 s** (x32, 2.7–3.6 V) | DS8626 Table 40 `tERASE128KB` | max | primary |
 | Программирование 512 B (128 слов × 100 µs) | **12.8 ms** | DS8626 Table 40 `tPROG` (100 µs/слово max) | max, derived (арифметика) | primary + derived |
 | Fetch кода из flash во время erase/program | **stalled** (single-bank F405: весь flash заблокирован; ISR с вектором/кодом во flash отложен до конца операции; NVIC держит pending) | RM0090 §3.6 p.84 | — | primary (+ SRAM-часть — inference) |

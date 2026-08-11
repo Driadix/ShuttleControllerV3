@@ -17,7 +17,7 @@
 ### Domain core (8 компонентов)
 
 | Компонент | Одна обязанность | Прямой ответ на V1-дефект |
-|---|---|---|
+| --- | --- | --- |
 | Semantic Contract & Admission | валидация запросов (парсинг-независимо), authority-роли, epoch fencing, idempotency, admission, создание операций; policy очередей и overload | admission, размазанный по processPacket и run_Cmd |
 | Operation Runtime | lifecycle операций (дерево root/suboperation), bounded step execution, composition, outcomes; исполнение safety-операций как внутренних корневых | синхронные длинные операции внутри run_Cmd |
 | Safety Authority | policy: precedence, единственная arbitration boundary, fault/warning model, safe states, watchdog health aggregation, stall-детекция, obstacle-классификация, авторизация эвакуации, мониторинг manual lease | SystemYield как safety-ядро |
@@ -130,7 +130,7 @@
 ## 7. Decision matrix (спорные границы)
 
 | Граница | Решение | Отклонено | Основание |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Форма швов | ports-and-adapters, deps внутрь | 3-layer; без шва | gates issue 10 |
 | Инвентарь | 8 domain + 4 класса адаптеров | State Store; Orchestrator | каждый компонент = V1-дефект |
 | Arbitration | единая воронка в Safety Authority | 2 порта; нейтральный arbiter | motor_Stop: 10+ call sites, 3 семантики |

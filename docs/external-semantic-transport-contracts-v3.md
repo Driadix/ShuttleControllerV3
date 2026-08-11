@@ -25,7 +25,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 
 ## 2. Слойность (Q1, Q2)
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │  Semantic Contract & Admission (domain)     │
 │  request/operation/session/update policies  │
@@ -50,7 +50,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 ### 3.1 Inventory
 
 | Profile ID | Физический baseline (V1 evidence) | Роль |
-|---|---|---|
+| --- | --- | --- |
 | `network_bridge` | UART path, ранее «display» (230400 8E1-класс) | Доверенный мост: TCP debug, будущий HTTP/JSON и др. UI/дисплей **за** мостом |
 | `radio` | E22 UART + route header | Доверенный radio control/diagnostics client |
 
@@ -65,7 +65,6 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 - link detection / RX frame timeout hooks;
 - **effective profile** определяется контроллером по **ingress adapter / provisioned endpoint**, не по client field;
 - **mutating Update-class допускается только когда effective profile = `network_bridge`**.
-
 
 **Soft (capabilities ∩ authority, не hard allowlist message family):**
 
@@ -83,7 +82,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 
 ### 4.1 Frame layout (normative structure)
 
-```
+```text
 | sync0 | sync1 | header | payload | frameChecksum |
 ```
 
@@ -95,7 +94,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 ### 4.2 Fixed identity widths
 
 | Field | Width | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `controllerEpoch` | u32 | opaque boot-instance; controller-authored |
 | `requestId` | u32 | unique per `(controllerEpoch, authorityId)` logical request |
 | `operationId` | u32 | controller-authored after accept; never client-supplied as identity |
@@ -110,7 +109,7 @@ Strings/UUID на hot path **не** используются.
 ### 4.3 Dual-plane correlation (Q9)
 
 | Plane | Fields | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | Transport | `frameSeq`, transport ACK/`refFrameSeq` | loss/dup на link, parser pacing |
 | Semantic | `controllerEpoch`, `requestId`, `authorityId`, `operationId` | admission, idempotency, outcomes |
 
@@ -131,7 +130,6 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - `supportedCapabilities` (bitmask/set);
 - profile-relevant limit flags (без обязательных чисел budgets — они в #48, могут advertise как opaque limit class later);
 - assigned `authorityId` + **granted** role set / capability grant for this principal (controller-authored).
-
 
 **Client → controller (hello / interest):**
 
@@ -188,10 +186,6 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - role в payload должна быть ∈ grant **resolved** principal;
 - radio path с `bridgePrincipalHandle`, или bridge principal-scoped frame без handle → reject.
 
-
-
-
-
 ### 5.2 Evolution
 
 - **Major:** breaking wire/semantics; old clients must not mutate.
@@ -203,7 +197,7 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 Threat model core v3: **channel-trust by deployment** (локальный bridge UART/TCP в site trust, own radio link). Операционное доверие к deployment-каналу **не** равно self-issued privileges на wire.
 
 | Mechanism | Protects | Does **not** provide |
-|---|---|---|
+| --- | --- | --- |
 | `frameChecksum` | accidental corruption | authenticity vs active peer, anti-spoof |
 | Controller-assigned `authorityId` + **granted** roles + admission | operation class / unprovisioned surface; claimed-role escalation | cryptographic proof of human operator; hostile-link anti-spoof beyond channel trust |
 | Capability gates + **effective** profile hard rules | Update-class only on effective network_bridge; feature surface; profile spoof rejected | rights beyond grant / claimed profileId |
@@ -212,14 +206,12 @@ Threat model core v3: **channel-trust by deployment** (локальный bridge
 | Transport MAC/TLS | — | **not in core v3**; future capability/profile extension |
 | Bridge-side client auth (outside controller wire) | which downstream client the bridge maps to a handle | end-to-end crypto to controller |
 
-
 Explicit non-claims: no hostile-RF confidentiality, no mutual auth crypto session on controller wire in core.
-
 
 ## 7. Message taxonomy (Q11)
 
 | Family | Direction (typ.) | Queue class | Examples |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `Handshake` | bi | Control (setup) | Hello, HelloAck, EpochAnnounce, CapabilityBind |
 | `Control` | in/out | Control | OperationRequest, AdmissionAck, StopIntent, Query, Subscribe |
 | `Service` | in/out | Service | SetWallClock, ConfigGet/Set/Sync, provisioning ops, diagnostics cmds |
@@ -235,7 +227,7 @@ Family boundaries существуют для policy/tests; плоский V1 Ms
 ### 8.1 Inbound
 
 | Class | Content | Overload |
-|---|---|---|
+| --- | --- | --- |
 | Control | ops, queries, subs, session, handshake | reject new with explicit code when full |
 | Service | config/time/calib/diag mutating+ro service | reject when full |
 | Update | update transaction messages | reserved capacity while in-progress; reject **new** transactions when saturated |
@@ -243,7 +235,7 @@ Family boundaries существуют для policy/tests; плоский V1 Ms
 ### 8.2 Outbound
 
 | Class | Overload |
-|---|---|
+| --- | --- |
 | telemetry | drop-oldest (freshness) |
 | events | reserved capacity; drop-newest on overflow |
 | logs | reserved capacity; drop-newest |
@@ -258,7 +250,6 @@ Force-stop на CAN **вне** этих очередей и **вне** client pr
 Mutating operation request payload minimum:
 
 - `requestId`, `controllerEpoch`, `authority` role (**must be ∈ handshake grant**), `authorityId` (**controller-assigned; echo only**), `operationType`, `parameters` (typed; empty object allowed), conditional `parentOperationId` (not used by external clients for child creation under normal rules).
-
 
 Positive admission ACK minimum:
 
@@ -297,7 +288,7 @@ Mutating only on `network_bridge` with Update Authority + admission (window Serv
 Normative message set:
 
 | Message | Purpose |
-|---|---|
+| --- | --- |
 | `UpdateBegin` | start transaction; image meta (size, checksum alg, signature alg, version ids) |
 | `UpdateStageChunk` | ordered chunk payload + offset + chunk checksum |
 | `UpdateFinalize` | end staging; request validation |
@@ -345,7 +336,7 @@ Rules:
 ### Timers
 
 | Layer | Examples | Effect |
-|---|---|---|
+| --- | --- | --- |
 | Transport | RX frame timeout, ACK wait, link-quiet | drop partial frame / declare link degraded / transport error codes |
 | Semantic | lease, type link-loss policy, epoch | session stop; op continue/controlled_stop/fail_safe per type; EpochMismatch |
 
@@ -416,14 +407,12 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) handle on radio → reject; (e) missing handle on bridge hello or principal-scoped frame → reject; (f) **cross-principal spoof:** handle=A + payload authorityId=B → reject; (g) **handle lifetime:** after H→authorityA, disconnect, reconnect **same** client with H → still authorityA; (h) **no reassign:** bridge must not map H to a different client in-epoch — controller continues treating H as authorityA for entire epoch (burned handle); new client requires unused handle; epoch change clears map.  
 15. **Profile spoofing:** frame on radio ingress with `expectedProfileId=network_bridge` → `ProfileMismatch` / no network_bridge privileges; UpdateBegin on radio ingress → `ProfileDenied` regardless of claimed expected profile.
 
-
-
 Численные stress bounds — #48; HIL — verification pyramid #52.
 
 ## 19. Deferred / handoffs
 
 | Topic | Owner |
-|---|---|
+| --- | --- |
 | Numeric budgets, timeouts, MTU, cadences | #48 |
 | Bootloader, slots, activation, RTC power, param catalog | #50 |
 | Toolchain/codegen if ever introduced | #51 |
@@ -433,7 +422,7 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 ## 20. Decisions index (grilling)
 
 | ID | Decision |
-|---|---|
+| --- | --- |
 | Q1 | Shared contract core + transport profiles |
 | Q2 | Canonical binary framing + typed payloads |
 | Q3/Q6 | Profiles: `network_bridge` + `radio` only (no `display`); effective profile from ingress |
