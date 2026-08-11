@@ -2,7 +2,7 @@
 
 Статус: **утверждено владельцем (гриллинг, тикет [#51](https://github.com/Driadix/ShuttleControllerV3/issues/51))**. Вход в logical item `Engineering & Release` нормативного пакета (issue 8, gate G5) и в architecture proving slice (тикет #54). Каждый численный или версионный факт имеет источник; воспроизводимость проверяема командами раздела «Проверяемость».
 
-Файлы каркаса (`platformio.ini`, workflow, скрипты enforcement, `.clang-tidy`) материализуются после достижения Destination карты (правило карты: PlatformIO-каркас вне планирующей карты) - первым шагом proving slice #54 (frozen toolchain bring-up). Настоящий документ задаёт их обязательное содержимое; ссылки на `tools/*` и jobs в разделах 7-13 являются спецификацией этого содержимого.
+Production-каркас (CI workflow, скрипты enforcement, `.clang-tidy`, PR-шаблоны) материализуется после достижения Destination карты (правило карты: PlatformIO-каркас вне планирующей карты), в implementation-карте. Исключение - минимальный исполняемый каркас proving slice #54: #54 - тикет текущей карты и pre-Destination evidence (issue 10: harness готовится до реализации capability functions, включает frozen toolchain/board bring-up); `platformio.ini` с пинами раздела 3, env kernel variants и native test env создаются в рамках #54 и эмпирически верифицируют пины раздела 3 до G4/G5. Настоящий документ задаёт обязательное содержимое обоих уровней; ссылки на `tools/*` и jobs в разделах 7-13 являются спецификацией production-каркаса.
 
 ## 1. Назначение и входы
 
@@ -187,7 +187,7 @@ Permissions release-workflow: `contents: write`, `id-token: write`, `attestation
 
 ## 12. Поддержка proving slice (#54)
 
-Frozen toolchain (раздел 3) разблокирует #54. Требования baseline к harness:
+Frozen toolchain (раздел 3) разблокирует #54. Harness #54 исполняется на текущей карте (pre-Destination evidence, issue 10); его минимальный исполняемый каркас (platformio.ini с пинами, kernel envs, native test env) - исключение из правила «каркас после Destination» (раздел 1). Требования baseline к harness:
 
 - Три kernel variants (cooperative / hybrid / static RTOS) выражаются как **отдельные env** одного дерева исходников: общий domain core + `platform/execution_<variant>.cpp` точки входа; без изменения домена.
 - Каждый env наследует пины раздела 3; RTOS-variant добавляет свои пакеты с пинами (политика раздела 3).
