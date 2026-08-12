@@ -1,7 +1,7 @@
 # External Semantic & Transport Contracts V3
 
-Статус: **утверждено владельцем (Q1–Q26)**; резолюция — тикет [«Специфицировать protocol V3 (wire, transport profiles, negotiation, security)»](https://github.com/Driadix/ShuttleControllerV3/issues/47) карты #1.  
-Logical item 6 нормативного пакета (issue 8), gate G3.  
+Статус: **In Review - profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем (Q1-Q26) в тикете [«Специфицировать protocol V3 (wire, transport profiles, negotiation, security)»](https://github.com/Driadix/ShuttleControllerV3/issues/47)**.
+Logical item 6 нормативного пакета (issue 8), gate G3.
 Входы: semantic contract ([#13](https://github.com/Driadix/ShuttleControllerV3/issues/13), `docs/semantic-contract-v3.md`), system context ([#2](https://github.com/Driadix/ShuttleControllerV3/issues/2)), architecture/queues/Time ([#43](https://github.com/Driadix/ShuttleControllerV3/issues/43), `docs/software-architecture-boundaries-v3.md`), lifecycle ([#46](https://github.com/Driadix/ShuttleControllerV3/issues/46), `docs/lifecycle-axes-v3.md`), safety domain conditions ([#45](https://github.com/Driadix/ShuttleControllerV3/issues/45); wire registry здесь).  
 Термины — `CONTEXT.md`. Совместимость wire с V1/V7 **не требуется**. Реализация внешних клиентов и адаптеров (UI дисплея, HTTP/JSON, WMS) **вне scope** этой карты.
 
@@ -148,18 +148,6 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - Controller advertise в handshake/ACK включает `effectiveProfileId`, который client обязан учитывать.
 - Все hard profile rules (Update-class, budgets, framing expectations) применяются к **effective** profile.
 
-### 5.2 Shuttle profile status query
-
-Read-only identity/query snapshot различает профиль шаттла от transport profile и возвращает:
-
-- `supportedShuttleProfileIds`: firmware-resident bundles универсального app image (`800`, `1000`, `1200`);
-- `qualifiedShuttleProfileIds`: подмножество, аутентифицированное подписью текущего app image и допущенное его release evidence;
-- `configuredShuttleProfileId`: optional persisted выбор устройства; сохраняется при несовместимом fallback image;
-- `activeShuttleProfileId`: optional runtime-профиль; присутствует только когда configured id входит в qualified set, иначе отсутствует;
-- `shuttleProfileStatus`: `Unconfigured | Active | QualificationMismatch`.
-
-Config/provisioning принимает shuttle profile id только из qualified set. Транспортные `effectiveProfileId`, `expectedProfileId`, `ProfileDenied` и `ProfileMismatch` не используются для этого решения.
-
 **Назначение principal / `authorityId` (channel-trust, без crypto session на wire контроллера):**
 
 - `authorityId` **всегда назначает контроллер**. Клиент конечного UI **не** self-binds identity.
@@ -200,7 +188,19 @@ Config/provisioning принимает shuttle profile id только из qual
 - role в payload должна быть ∈ grant **resolved** principal;
 - radio path с `bridgePrincipalHandle`, или bridge principal-scoped frame без handle → reject.
 
-### 5.2 Evolution
+### 5.2 Shuttle profile status query
+
+Read-only identity/query snapshot различает профиль шаттла от transport profile и возвращает:
+
+- `supportedShuttleProfileIds`: firmware-resident bundles универсального app image (`800`, `1000`, `1200`);
+- `qualifiedShuttleProfileIds`: подмножество, аутентифицированное подписью текущего app image и допущенное его release evidence;
+- `configuredShuttleProfileId`: optional persisted выбор устройства; сохраняется при несовместимом fallback image;
+- `activeShuttleProfileId`: optional runtime-профиль; присутствует только когда configured id входит в qualified set, иначе отсутствует;
+- `shuttleProfileStatus`: `Unconfigured | Active | QualificationMismatch`.
+
+Config/provisioning принимает shuttle profile id только из qualified set. Транспортные `effectiveProfileId`, `expectedProfileId`, `ProfileDenied` и `ProfileMismatch` не используются для этого решения.
+
+### 5.3 Evolution
 
 - **Major:** breaking wire/semantics; old clients must not mutate.
 - **Minor/patch:** additive messages/fields behind capabilities; contract tests per version.

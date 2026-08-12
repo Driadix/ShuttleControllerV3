@@ -1,6 +1,6 @@
 # Implementation Plan V3 (item 13, gate G6)
 
-Статус: **In Review (тикет [#57](https://github.com/Driadix/ShuttleControllerV3/issues/57), gate G6)**; статус Approved фиксируется при закрытии тикета (issue 8 §7: Draft → In Review → Approved). Вход в logical item `Implementation Plan` нормативного пакета (issue 8, item 13, gate G6). Класс: Normative (issue 8 §2). Этот документ фиксирует трассируемую декомпозицию реализации, зависимости, acceptance gates и rollout order. Реализационный дизайн железо-завязанных модулей (движение, CAN, I2C, алгоритмы) - территория implementation-карты с evidence с реального шаттла (правило карты, Notes).
+Статус: **In Review - profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision Approved при закрытии [#57](https://github.com/Driadix/ShuttleControllerV3/issues/57), gate G6**. Переутверждение фиксируется при закрытии #59 (issue 8 §7: Draft → In Review → Approved). Вход в logical item `Implementation Plan` нормативного пакета (issue 8, item 13, gate G6). Класс: Normative (issue 8 §2). Этот документ фиксирует трассируемую декомпозицию реализации, зависимости, acceptance gates и rollout order. Реализационный дизайн железо-завязанных модулей (движение, CAN, I2C, алгоритмы) - территория implementation-карты с evidence с реального шаттла (правило карты, Notes).
 
 Термины - канонические из `CONTEXT.md`.
 
@@ -117,13 +117,13 @@
 
 ## 7. G6 closure checklist (issue 8 §6)
 
-- [x] Нет TBD и открытых блокирующих решений в scope (все решения тикетов карты приняты; F4 - открытый риск §6, закрывается до входа в фазу 1 или переводится явно).
+- [x] Pre-rebaseline revision: нет TBD и открытых блокирующих решений в исходном scope (все решения карты #1 приняты; F4 - открытый риск §6, закрывается до входа в фазу 1 или переводится явно).
 - [x] Каждый модуль имеет источник, зависимости и acceptance (таблицы §3-4).
 - [x] Обязательные сценарии (safety-путь C1, fault-пути, overload, update) покрыты acceptance.
 - [x] Трассировка obligations/бюджетов/verification → модули полна (§4, включая #49 §13 и #50 §12).
 - [x] Derived views (trace/status/coverage) - тикет #56 (Baseline Manifest).
-- [x] Independent review: проведено при закрытии тикета #57 (2 MAJOR + 4 MINOR + 2 NIT учтены).
-- [ ] Owner approval: gate G6 (фиксируется при закрытии тикета #57).
+- [x] Pre-rebaseline revision: independent review проведен при закрытии тикета #57 (2 MAJOR + 4 MINOR + 2 NIT учтены).
+- [ ] Profile qualification rebaseline: independent review final revision и owner approval фиксируются при закрытии [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59).
 
 ## 8. Ссылки
 

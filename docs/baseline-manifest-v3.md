@@ -1,6 +1,6 @@
 # Baseline Manifest V3 (gate G6)
 
-Статус: **финальный при закрытии gate G6 (тикет [#56](https://github.com/Driadix/ShuttleControllerV3/issues/56))**. Класс: Derived View (issue 8 §2: manifest и traceability/status/coverage матрицы; проверяются на полноту и консистентность, не получают повторного смыслового approval). Единая точка входа нормативного пакета V3.
+Статус: **In Review - profile qualification rebaseline items 6/7/8/11/12/13; финальный статус после независимого review, owner approval и закрытия [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59)**. Исторический gate G6 закрыт тикетом [#56](https://github.com/Driadix/ShuttleControllerV3/issues/56) для предыдущих revisions. Класс: Derived View (issue 8 §2: manifest и traceability/status/coverage матрицы; проверяются на полноту и консистентность, не получают повторного смыслового approval). Единая точка входа нормативного пакета V3.
 
 Правила: изменение любого включённого item revision - по change control (#8 §9, классы Editoral/Clarifying/Semantic/Baseline-affecting); manifest сам по себе не дублирует нормативное содержание (только ревизии, статусы, gates, approval records).
 
@@ -15,22 +15,22 @@
 | 5 | Safety & Health | `docs/safety-model-v3.md` | `1b08bb8` | #45 | G2 | Approved | владелец |
 | 6 | External Semantic & Transport Contracts | `docs/external-semantic-transport-contracts-v3.md` | pending rebaseline revision | #47, #59 | G3 | In Review (profile qualification rebaseline) | pending review/closure #59 |
 | 7 | Configuration, Identity & Lifecycle | `docs/configuration-identity-lifecycle-v3.md` + `docs/lifecycle-axes-v3.md` | pending rebaseline revision; `a2544b3` | #50, #46, #59 | G2/G3 | In Review (profile qualification rebaseline) | pending review/closure #59 |
-| 8 | Observability & Diagnostics | `docs/observability-architecture-v3.md` | `9e9c48b` | #49 | G3 | Approved | владелец |
+| 8 | Observability & Diagnostics | `docs/observability-architecture-v3.md` | pending rebaseline revision | #49, #59 | G3 | In Review (shuttle-profile snapshot rebaseline) | pending review/closure #59 |
 | 9 | Quality Attributes & Budgets | `docs/quality-attributes-and-budgets-v3.md` | `1b08bb8` | #48 | G4 | Approved | владелец |
 | 10 | Software Architecture | `docs/software-architecture-boundaries-v3.md` + issue 10 (execution) + `docs/proving-slice-v3.md` | `1b08bb8`; issue 10 resolution; `9c045f1` | #43, #10, #54 | G4 | Approved (execution conditional, host-only evidence) | владелец |
-| 11 | Engineering & Release | `docs/engineering-and-release-baseline-v3.md` | `1b08bb8` | #51 | G5 | Approved | владелец |
+| 11 | Engineering & Release | `docs/engineering-and-release-baseline-v3.md` | pending rebaseline revision | #51, #59 | G5 | In Review (profile qualification evidence carrier) | pending review/closure #59 |
 | 12 | Verification Strategy & Acceptance | `docs/verification-strategy-v3.md` | pending rebaseline revision | #52, #59 | G5 | In Review (profile qualification rebaseline) | pending review/closure #59 |
 | 13 | Implementation Plan | `docs/implementation-plan-v3.md` | pending rebaseline revision | #57, #59 | G6 | In Review (profile qualification rebaseline) | pending review/closure #59 |
 
 Evidence assets (класс Evidence, #8 §2): `docs/research/v1-system-evidence-index.md` (тег `evidence/v1-system-evidence-index`), `docs/research/v1-execution-evidence.md` (`evidence/v1-execution-evidence`), `docs/research/v3-capability-evidence-slices.md` (`evidence/v3-capability-evidence-slices`), `docs/research/proving-slice-report.md` (host-only, #54), `docs/proving-slice-v3.md` (design, #54).
 
-Profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): единый binary сохраняет supported profiles 800/1000/1200; production qualification принадлежит конкретному signed app image; `v1.0.0` получает singleton qualification target на gate Фазы 3; wire/lifecycle/verification/implementation items изменены согласованно.
+Profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): единый binary сохраняет supported profiles 800/1000/1200; production qualification принадлежит конкретному signed app image; `v1.0.0` получает singleton qualification target на gate Фазы 3; wire/lifecycle/observability/release/verification/implementation items изменены согласованно.
 
 ## 2. Status matrix (по классам #8 §2)
 
 | Класс | Покрытие | Статус |
 | --- | --- | --- |
-| Normative (13 items) | items 6, 7, 12 и 13 изменены profile qualification rebaseline | In Review до независимого review и закрытия [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); остальные items Approved |
+| Normative (13 items) | items 6, 7, 8, 11, 12 и 13 изменены profile qualification rebaseline | In Review до независимого review и закрытия [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); остальные items Approved |
 | Evidence | V1-индексы, capability slices, proving slice отчёт | verified (independent review) |
 | Governance | issue 8, triage/hitl/domain conventions, change classes | Approved |
 | Derived Views | настоящий manifest + матрицы §3-4 | In Review вместе с profile qualification rebaseline |
@@ -74,7 +74,7 @@ Profile qualification rebaseline [«Переутвердить профильн�
 
 ## 5. G6 closure (issue 8 §6)
 
-- [ ] Baseline Manifest фиксирует main revisions и approval 13 items - profile qualification revisions items 6, 7, 12 и 13 pending до merge/закрытия #59.
+- [ ] Baseline Manifest фиксирует main revisions и approval 13 items - profile qualification revisions items 6, 7, 8, 11, 12 и 13 pending до merge/закрытия #59.
 - [x] Derived views: trace (hazard → verification → модуль), status (item/class), coverage (obligations → модули).
 - [x] Orphan/uncovered: каждый obligation имеет модуль и статус; каждый модуль имеет acceptance (§3 implementation-plan).
 - [x] Schema-чеки: markdownlint-clean, относительные ссылки, без TBD.
