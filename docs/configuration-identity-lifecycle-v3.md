@@ -142,13 +142,14 @@ Per-param диапазоны на admission (reject-коды #47); кросс-и
 | Provisioning (initial) | Serving + любая health (вкл. Fault) при Unprovisioned | HZ-13/14 необратимы (#46) |
 | **ClearFault** | **Serving + Fault** + qualified baseline (#45/#40: квалифицированное восстановление sensing/шины, физическая неподвижность) + слот + Service authority | после очистки health → Initializing → Ready/Degraded (requalification); в Ready/Degraded неприменима (reject); единственный mutating explicit-reset (power-cycle ≠ acknowledgment) |
 | Update | Serving + Ready/Degraded + Provisioned + слот → handoff окно Update | Update Authority |
-| Recovery-рефлэш | окно Recovery (Degraded, HZ-15): update-class + read-only | перепрошивка битого слота артефактом под его base (таргет — неактивный слот по персистентному указателю §3.1; load_address-чек против него, §3.2) |
+| Recovery-рефлэш | окно Recovery (Degraded; вход — HZ-15 либо `ProfileQualificationMismatch` по §3.3/§11): update-class + read-only | перепрошивка битого слота артефактом под его base (таргет — неактивный слот по персистентному указателю §3.1; load_address-чек против него, §3.2); при mismatch admission сверяет configured profile с qualification target, motion закрыт |
 | Read-only | Serving/Update/Recovery, health любое | #46 |
 
 ### 9.3 FactoryReset и Recovery
 
 - **FactoryReset = generation-bump** в config-журнале (s7): одна атомарная запись `configGeneration++` → все записи `config:*`/`calib:*` старых поколений игнорируются (логический wipe; физический reclaim — лениво при GC); power-cut-safe. **Status sector (s10) и Backup SRAM-маркеры не трогаются** (маркер снимается только ClearFault — семантика power-cycle ≠ acknowledgment не нарушается). Guards: Serving + Ready/Degraded + stationary + слот + Service authority. Результат: `Unprovisioned` + дефолты, motion закрыт (HZ-13), **без Degraded** (намеренное действие, не HZ-14-corruption). Событие в журнал (#49).
-- **Recovery**: `Failed` → bootloader грузит старый слот → окно Recovery: поверхность = update-class (перепрошивка битого слота) + read-only → `Committed` → Serving. **Оба слота невалидны / порча status → физический сервис** (ROM-bootloader/ST-Link) — последний рубеж.
+- **Recovery (HZ-15)**: `Failed` → bootloader грузит старый слот → окно Recovery: поверхность = update-class (перепрошивка битого слота) + read-only → `Committed` → Serving. **Оба слота невалидны / порча status → физический сервис** (ROM-bootloader/ST-Link) — последний рубеж.
+- **Recovery (`ProfileQualificationMismatch`, §3.3/§11)**: auto-fallback загрузил ранее committed image, чей authenticated `qualifiedProfileIds` не содержит persisted `configuredProfileId`. `activeProfileId` отсутствует, motion закрыт, journal сохранён; поверхность = update-class + read-only; admission сверяет configured profile и допускает совместимый signed image (включая recovery-перепрошивку таргета по §9.2); совместимый image → `activeProfileId` восстанавливается → `Serving`. Автосмена профиля, очистка journal и подстановка default profile запрещены.
 
 ### 9.4 Commissioning
 
