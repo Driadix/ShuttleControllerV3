@@ -142,7 +142,7 @@ Per-param диапазоны на admission (reject-коды #47); кросс-и
 | Provisioning (initial) | Serving + любая health (вкл. Fault) при Unprovisioned | HZ-13/14 необратимы (#46) |
 | **ClearFault** | **Serving + Fault** + qualified baseline (#45/#40: квалифицированное восстановление sensing/шины, физическая неподвижность) + слот + Service authority | после очистки health → Initializing → Ready/Degraded (requalification); в Ready/Degraded неприменима (reject); единственный mutating explicit-reset (power-cycle ≠ acknowledgment) |
 | Update | Serving + Ready/Degraded + Provisioned + слот → handoff окно Update | Update Authority |
-| Recovery-рефлэш | окно Recovery (Degraded; вход — HZ-15 либо `ProfileQualificationMismatch` по §3.3/§11): update-class + read-only | перепрошивка битого слота артефактом под его base (таргет — неактивный слот по персистентному указателю §3.1; load_address-чек против него, §3.2); при mismatch admission сверяет configured profile с qualification target, motion закрыт |
+| Recovery-рефлэш | окно Recovery (Degraded; вход - HZ-15 либо `ProfileQualificationMismatch` по §3.3/§11): update-class + read-only | перепрошивка битого слота артефактом под его base (таргет - неактивный слот по персистентному указателю §3.1; load_address-чек против него, §3.2); при mismatch admission сверяет configured profile с qualification target, motion закрыт |
 | Read-only | Serving/Update/Recovery, health любое | #46 |
 
 ### 9.3 FactoryReset и Recovery
