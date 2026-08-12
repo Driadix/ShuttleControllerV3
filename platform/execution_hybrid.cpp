@@ -134,17 +134,21 @@ std::uint32_t force_stop_count() { return g_force_stop_count; }
 
 void run()
 {
+    // Same tick-sync policy as the cooperative kernel: process each monotonic
+    // tick exactly once; first call waits for tick 1.
+    std::uint64_t last_processed = monotonic::now_ms();
     for (;;)
     {
-        on_tick();
 #ifdef __arm__
-        const std::uint64_t deadline = monotonic::now_ms() + 1;
-        while (monotonic::now_ms() < deadline)
+        while (monotonic::now_ms() <= last_processed)
         {
-            __asm__ volatile("wfi"); // wait for the tick to advance
+            __asm__ volatile("wfi");
         }
+        last_processed = monotonic::now_ms();
+        on_tick();
 #else
         // Host: tests drive on_tick() directly.
+        (void)last_processed;
 #endif
     }
 }

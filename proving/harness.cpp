@@ -166,9 +166,13 @@ void actuator_step(void* ctx)
 
 void schedule_standard_steps(HarnessState& state)
 {
-    kernel::schedule(sensing_step, &state, 1);
-    kernel::schedule(safety_step, &state, 2);
-    kernel::schedule(actuator_step, &state, 3);
+    // All three steps run in the SAME tick (deadline 0 = due at the next
+    // on_tick): the C1 chain sensing -> safety -> arbitration -> actuation is
+    // a same-tick composition, so the trigger->output trace (T_eso) is
+    // measured within one bounded step, not spread across ticks.
+    kernel::schedule(sensing_step, &state, 0);
+    kernel::schedule(safety_step, &state, 0);
+    kernel::schedule(actuator_step, &state, 0);
 }
 
 } // namespace proving

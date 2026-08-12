@@ -1,6 +1,10 @@
 # Architecture proving slice V3 (тикет #54)
 
-Статус: **draft для тикета [#54](https://github.com/Driadix/ShuttleControllerV3/issues/54)**. Ветка: `proving/slice-scaffold`. Входы: issue 10 (выбор execution architecture), [#43](https://github.com/Driadix/ShuttleControllerV3/issues/43) §8 (15 validation obligations), [#48](https://github.com/Driadix/ShuttleControllerV3/issues/48) §11 (measurement obligations) и §2–8 (бюджеты), [#45](https://github.com/Driadix/ShuttleControllerV3/issues/45) (safety-дедлайны C1–C6, stop-профили), [#51](https://github.com/Driadix/ShuttleControllerV3/issues/51) (frozen toolchain, §12), [#52](https://github.com/Driadix/ShuttleControllerV3/issues/52) (метод O4, протокол observed-maxima).
+Статус: **draft для тикета [#54](https://github.com/Driadix/ShuttleControllerV3/issues/54)**. Ветка: `proving/slice-scaffold`.
+
+**Scope-решение владельца (2026-08-12): proving slice исполняется host-only** — целевая плата и HIL-стенд недоступны в рамках этой карты. Target-измерения невозможны; все obligations, требующие железа, явно переводятся в implementation-карту (допускается acceptance #54: «закрыты измерением или явно переведены в следующие шаги»). Slice даёт: host-сравнение cooperative vs hybrid (детерминированное), сборку и статический анализ static RTOS variant, host-simulation с физически обоснованными параметрами (datasheet-числа), static resource evidence и документированные переводы. Host-результаты НЕ называются measured (правило #48 §1); target-валидация бюджетов — implementation-карта.
+
+Входы: issue 10 (выбор execution architecture), [#43](https://github.com/Driadix/ShuttleControllerV3/issues/43) §8 (15 validation obligations), [#48](https://github.com/Driadix/ShuttleControllerV3/issues/48) §11 (measurement obligations) и §2–8 (бюджеты), [#45](https://github.com/Driadix/ShuttleControllerV3/issues/45) (safety-дедлайны C1–C6, stop-профили), [#51](https://github.com/Driadix/ShuttleControllerV3/issues/51) (frozen toolchain, §12), [#52](https://github.com/Driadix/ShuttleControllerV3/issues/52) (метод O4, протокол observed-maxima, L3/SIL-роль host-интеграции).
 
 Правило карты: proving slice - **pre-Destination evidence** (issue 10) и единственное исключение из «только планируем». Он не реализует capability functions и не является production-каркасом. Его результат - сравнительный отчёт по трём kernel variants и закрытие 15 validation obligations #43 измерением либо явным переводом в следующий шаг.
 
@@ -8,13 +12,14 @@
 
 **Цель**: эмпирически подтвердить или опровергнуть условный выбор cooperative scheduler с bounded run-to-completion steps (issue 10) на реальном target до реализации capability functions, сравнив его с hybrid и static RTOS на **одинаковом** harness: одинаковые synthetic loads, одинаковые fault cases, одинаковые бюджеты.
 
-**Что НЕ входит** (scope-границы, правило карты):
+**Что НЕ входит** (scope-границы, правило карты + host-only решение):
 
 - Реализация capability functions (движение, лифт, загрузка) и их алгоритмов (#30–42).
 - Production-каркас (CI workflow, enforcement-скрипты, `.clang-tidy`, PR-шаблоны) - после Destination.
 - Проектирование domain-компонентов V3 в production-качестве (#43 даёт границы, slice ставит только минимальные упрощённые прототипы для измерения execution-свойств).
 - Изменение PCB, электроники, механики.
 - Полевые измерения (D_brake, v_max_phys, ATEMP, availability) - implementation-карта (#52 §5.2).
+- **Целевые измерения и HIL** (нет платы/стенда в этой карте): все target-тайминги, физический CAN, power-cut, radio AUX - implementation-карта (L4 bench / L5 HIL по #52), переводы в §6.
 
 **Критерий выхода** (acceptance #54):
 
@@ -131,25 +136,25 @@
 | #14 | I2C recovery при параллельной BMS | recovery ≤ 16 SCL, cooldown ≥ 5 s; Degraded своевременно | L5 + L9 | target |
 | #15 | radio AUX-hang, mode-settle | ожидание неблокирующее; ни один шаг > T_step | AUX hold: split по bounded под-шагам | target (или HIL radio as-needed, #52 §5.3) |
 
-Переводы obligations в следующий шаг (допускаются acceptance #54):
+Переводы obligations в следующий шаг (допускаются acceptance #54; host-only решение владельца 2026-08-12 — целевое железо недоступно, перевод в implementation-карту с методом закрытия по #52 §5.3):
 
-| Obl | Статус на скелете | Куда переведено |
+| Obl | Статус на host-only slice | Закрытие в implementation-карте |
 | --- | --- | --- |
-| #1/#2 | host: цепочка детерминированно проверена (C1-тесты, µs-трассы); target-измерение T_eso/T_check_jitter/T_arb | bench bring-up (реальные адаптеры) |
-| #3 | W_flash/T_isr/force-stop в окне erase | bench bring-up (flash-адаптер, RAM-exec развилка) |
-| #4 | adapter duration bounds | bench bring-up (реальные CAN/UART/I2C адаптеры) |
-| #5 | watchdog под combined load: host-модель + starvation-тест; target-измерение | bench bring-up |
-| #6 | lease → stop: host-тест (CONTROLLED stop в пределах шага); target-измерение T_lease_stop | bench bring-up |
-| #8 | bounded steps: host-тесты; target-измерение | bench bring-up |
-| #9 | host property-тесты (wrap, backward jump) - закрыто | - |
-| #10 | link map + per-function stack (`.su`) на target-сборке; CPU/RAM/stack high-water | bench bring-up (runtime watermarks) |
-| #11 | power-cut: save / update / mid-operation | HIL (#52 §6) |
-| #12 | log-storm: host-тест (ни один шаг > T_step); target-проверка неблокирующего TX | bench bring-up |
-| #13 | CAN dual-class TX/RX/flood: host-тесты (RX overflow, TX budget); физический слой | bench + HIL (CAN-инъектор) |
-| #14 | I2C recovery при BMS | bench bring-up (I2C-адаптер + bus-busy) |
-| #15 | radio AUX-hang | HIL radio as-needed (#52 §5.3) |
+| #1/#2 | host: C1-цепочка детерминированно проверена (µs-трассы) + host-simulation с wire/CPU-временем (§14) | L4: T_eso/T_check_jitter/T_arb измерением (O4) |
+| #3 | host-simulation W_flash (datasheet 4 s) + ISR-модель; RAM-exec развилка документирована | L4: W_flash/T_isr на PCB + force-stop в окне erase |
+| #4 | host-simulation adapter duration bounds (CAN/UART/I2C wire+CPU модели, §14) | L4: per-adapter максимумы |
+| #5 | host: watchdog-модель (6.8–18.8 s) + starvation-тест + combined-load sim | L4/L5: watchdog под combined load |
+| #6 | host: lease → stop тест (CONTROLLED stop в пределах шага) | L4: T_lease_stop измерением |
+| #8 | host: bounded steps тесты + sim (сумма CPU-cost шага ≤ T_step) | L4: bounded steps под combined load |
+| #9 | host property-тесты (wrap, backward jump) - **закрыто** | - |
+| #10 | link map + per-function stack (`.su`) + RAM-лимиты из линкера; runtime high-water | L4: runtime stack/CPU high-water |
+| #11 | power-cut: - (нет железа) | L5 (HIL, #52 §6.2): save/update/mid-op |
+| #12 | host: log-storm тест (ни один шаг > T_step, sim CPU-cost) | L4/L5: неблокирующий TX |
+| #13 | host: RX/TX flood тесты + sim (drain CPU ≤ T_step); физический слой | L4/L5: CAN-инъектор |
+| #14 | I2C-recovery модель (≤ 16 SCL, cooldown ≥ 5 s) — host FSM-тесты | L5: stuck-инъекция при BMS |
+| #15 | radio AUX-hang: - (нет радио на host) | L5: AUX-hold (as-needed) |
 
-Пока bench-адаптеры не реализованы, target-нога скелета - пустой kernel loop; obligation-измерения #1-#6/#8/#10/#12-#14 явно переведены в bench-шаг (M1-фикс: честный transfer-лист вместо молчаливого отсутствия пути).
+Target-нога скелета (firmware envs) собирается и линкуется (coop/hybrid/rtos SUCCESS), но исполнение на железе и все target-измерения — implementation-карта. Прошивка НЕ является верифицированным артефактом без bring-up (#51 §15: validation obligation первого bring-up остаётся открытой).
 
 ## 7. Evidence-протокол
 
@@ -161,15 +166,36 @@
 
 Формат records - по #52 §7.1: `{ID (V-<n>), тип, refs (obligations), method, oracle, environment, результат, source/version/confidence, owner, дата}`; измерения - с workload metadata. Финальный отчёт - `docs/research/proving-slice-report.md` (после измерений).
 
-## 8. Host ↔ target распределение
+## 8. Host-only распределение (решение владельца 2026-08-12)
 
-| Слой | Среда | Что измеряется/проверяется |
+| Слой | Среда | Что покрывает |
 | --- | --- | --- |
 | Host (native, `pio test -e native-*`) | CI/local | deterministic core: bounded steps, arbitration порядок, queue overload, freshness FSM, lease FSM (F3), monotonic wrap/backward-jump (#9), C1-цепочка с µs-трассами, свойственные каждому kernel инварианты; fault-тесты F2/F3/F4/F6. **Host-тайминги виртуальные (детерминированные), НЕ execution-evidence** - реальные тайминги только target (DWT); host-нога отвечает за логику и сравнение kernel-семантики (issue 10 evidence #5) |
-| Bench (плата без механики) | плата + ST-Link + CAN-пир | тайминги: T_eso, T_check_jitter, T_arb, T_emit, T_fs, W_flash, ISR-latency в окне, adapter bounds, watchdog под combined load, CPU/RAM/stack (обл. #1–#8, #10, #12–#14) |
-| HIL (стенд) | CAN-инъектор, питание-реле, I2C-коммутатор, E22+аттенюатор | power-cut (#11), физический CAN (#13), radio AUX-hang (#15) - по #52 §6, as-needed на release/смену класса |
+| Host-simulation (native, `proving/sim`) | CI/local | физически обоснованные модели адаптеров (wire-time vs CPU-cost, datasheet-числа, §14): C1-цепочка, combined load, flash-окно, CAN flood, watchdog-модель - бюджеты #48 проверяются на симулированных worst-case параметрах; помечается `host-simulation`, НЕ measured (O4 к host не применяется) |
+| Static evidence | build | link map, per-function stack (`.su`), RAM/FLASH лимиты из линкера, zero-heap proof, include-lint |
+| Bench (плата) | - | **недоступен**; target-измерения #1–#6/#8/#10/#12–#14 → implementation-карта (L4) |
+| HIL (стенд) | - | **недоступен**; #11/#13-физика/#15 → implementation-карта (L5, #52 §6) |
 
-Bench-доступность: bring-up и тайминговые измерения требуют платы контроллера с ST-Link - организационный вход для владельца (см. #54 Notes). До получения платы host-слой полностью исполним.
+## 14. Host-simulation с физически обоснованными параметрами
+
+Добавляет к host-леге бюджетно-значимые числа (datasheet/code-derived, #48 §1), чтобы C1-цепочка и combined load проверялись не на абстрактных шагах, а на worst-case параметрах периферии. Модель различает:
+
+- **wire-time** - длительность физической передачи (CAN 108 бит/кадр @ 500 kbit/s ≈ 216 µs; UART byte 10 бит/байт @ 230400 ≈ 43 µs; I2C транзакция 13 байт @ 100 kHz ≈ 1.17 ms). Wire-time НЕ потребляет CPU: это «когда данные доступны на шине».
+- **CPU-cost** - время драйвера в шаге (CAN FIFO drain ~1–2 µs/кадр; UART drain ~1 µs/байт; I2C накладные ~10–100 µs/транзакцию; flash - блокирующее quiescent-окно целиком, 4 s worst по DS8626). CPU-cost суммируется в виртуальную длительность шага и проверяется против T_step = 10 ms (#48 §4).
+
+Параметры (источники): DS8626 Table 40 (tERASE128KB = 4 s, tPROG = 100 µs/слово), каденции и бюджеты #48 §5/§7, V1-индекс (baud, ToF-слот 8 ms, I2C 100 kHz, кодовая оценка чтения ToF ~1.2–1.5 ms).
+
+Сценарии sim (тесты native): C1-цепочка с wire/CPU-временем (stale → stop: T_fresh + T_eso ≤ 370 ms и T_eso ≤ 70 ms на симулированных параметрах), flash-окно (W_flash 4 s > T_step — единственное разрешённое исключение, quiescent, watchdog-окно 6.8 s держит), CAN flood (RX drain CPU ≤ T_step при > 64 кадров/тик), combined load (сумма CPU-cost шагов тика ≤ T_step). Результаты - `host-simulation`, никогда не called measured (правило #48 §1); маркируются в отчёте отдельным классом evidence.
+
+## 15. PCB-референс ControllerV6
+
+- **Факт** (владелец): референс платы - `C:\Projects\Shuttle\ShuttleController\docs\ControllerV6` (KiCad-проект: `ControllerV6.kicad_sch`/`.kicad_pcb`/`.step`, BOM `ControllerV6.csv`, netlist `ControllerV6.txt`, Gerber, даташиты Waveshare ToF B/D и Chipanalog CA-IS3020S).
+- BOM-факты: разъёмы Lifter DOWN, BUZZER, UART_ESP32, Pallet4, RS485, Log_UART, WS_Sensor6 и др.
+- Роль в этой карте: **документальный ресурс** для implementation-карты (bring-up, пины, сенсоры, изоляция CA-IS3020S). Полное извлечение пинов из KiCad-схемы и сверка с hardware-контрактом #51 §4/#43 — задача implementation-карты (первый bring-up), не этой. Сверка V6 vs производственная PCB (та, что под V1-кодом) — неизвестна и фиксируется как Unknown.
+
+## 16. Ссылки
+
+- §12 Ссылки (ниже) + ControllerV6-референс (§15), host-only решение владельца (2026-08-12, тикет #54).
 
 ## 9. Failure-условия пересмотра (проверяются явно, issue 10)
 

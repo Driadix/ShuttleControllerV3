@@ -81,20 +81,26 @@ std::uint64_t idle_ticks() { return g_idle_ticks; }
 
 void run()
 {
-    // Target entry: sync each on_tick() to a real TIM2 tick. WFI may wake on
-    // any interrupt (CAN/UART); loop until the monotonic tick actually
-    // advances so the scheduler processes exactly one tick per iteration.
+    // Target entry: process each monotonic tick exactly once. The first call
+    // waits for tick 1 (initialization completes before any processing);
+    // subsequent iterations wait until the clock strictly advances, so a step
+    // overrun or the flash window (now jumps by > 1) becomes an explicit
+    // catch-up: on_tick() processes all due steps at the new time and the
+    // scheduler-gap observable records the jump (issue #48 section 4: the
+    // flash window is the only allowed exception to T_step).
+    std::uint64_t last_processed = monotonic::now_ms();
     for (;;)
     {
-        on_tick();
 #ifdef __arm__
-        const std::uint64_t deadline = monotonic::now_ms() + 1;
-        while (monotonic::now_ms() < deadline)
+        while (monotonic::now_ms() <= last_processed)
         {
-            __asm__ volatile("wfi"); // wait for any interrupt; re-check tick
+            __asm__ volatile("wfi"); // wake on any interrupt; re-check the tick
         }
+        last_processed = monotonic::now_ms();
+        on_tick();
 #else
         // Host: tests drive on_tick() directly; run() is target-only.
+        (void)last_processed;
 #endif
     }
 }
