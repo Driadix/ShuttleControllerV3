@@ -151,7 +151,7 @@ V1 принимал произвольную длину без проверки 
 
 ## 11. V1 dispositions и evidence
 
-Системные поведения V1 и их disposition. Evidence: [Capability Evidence Slices каталога операций V3](./research/v3-capability-evidence-slices.md) и [Системный индекс свидетельств production-кода V1](https://github.com/Driadix/ShuttleControllerV3/blob/a7f927c6d3b44d58a2ae16feb3f386f0569a74df/docs/research/v1-system-evidence-index.md) (commit-pinned); канонический snapshot V1 - `Driadix/ShuttleController@708d090`.
+Системные поведения V1 и их disposition. Evidence: [Capability Evidence Slices каталога операций V3](./research/v3-capability-evidence-slices.md) и [Системный индекс свидетельств production-кода V1](./research/v1-system-evidence-index.md); канонический snapshot V1 - `Driadix/ShuttleController@708d090`.
 
 | Поведение | Evidence | Disposition | Основание |
 | --- | --- | --- | --- |

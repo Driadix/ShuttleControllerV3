@@ -233,4 +233,4 @@ Frozen toolchain (раздел 3) разблокирует #54. Harness #54 ис
 
 - `platformio.ini` V1 (пин `ststm32 @ 17.4.0`), README V1 (production Arduino IDE).
 - Факт-шиты (исследование, 2026-08-11): pinning PlatformIO (docs.platformio.org, platform-ststm32 v17.4.0 platform.json/platform.py, registry.platformio.org); coding standards (misra.org.uk, clang.llvm.org, cppcheck addons README, pvs-studio.com); provenance/CI (docs.github.com artifact attestations / immutable releases, actions/attest README, docs.platformio.org CI).
-- Входы: #43 (границы), issue 10 (proving slice), #48 (бюджеты), #45 (safety), #8 (item 11, G5), V1-индекс (`a7f927c`).
+- Входы: #43 (границы), issue 10 (proving slice), #48 (бюджеты), #45 (safety), #8 (item 11, G5), [V1-индекс](./research/v1-system-evidence-index.md).

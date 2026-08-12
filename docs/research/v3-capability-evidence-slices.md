@@ -11,9 +11,9 @@ MD024/MD036: намеренная повторяющаяся таксономи�
 
 - **Source**: production-код канонического репозитория `Driadix/ShuttleController` ветки `main` (evidence SHA `708d090980155d4a8d4644f7bcf87c383e81cd1d`); локальное зеркало `C:\Projects\Shuttle\ShuttleController` (HEAD `4a226e5`, исходники идентичны evidence SHA).
 - **Version**: bundle revision `8dd3d0c` -> `70d78ec` (ветка `research/v3-capability-evidence-slices`, перенесена в пакет issue 53); независимый checklist-review по gate `legacy evidence ready` пройден, 5 minor-правок anchors внесены, блокирующих замечаний нет.
-- **Confidence**: факты разделены по классам `configured`/`inferred` в тексте; measured worst-case bounds не заявляются (см. `v1-execution-evidence`); disposition `preserve/change/exclude/unknown` - предложения, не норматив до verification gate владельца.
+- **Confidence**: факты разделены по классам `configured`/`inferred` в тексте; measured worst-case bounds не заявляются (см. [v1-execution-evidence](./v1-execution-evidence.md)); disposition `preserve/change/exclude/unknown` - предложения, не норматив до verification gate владельца.
 - **Trace model (issue 5/12)**: при построении репозиторной схемы пакета (вариант B, issue 12) разделы bundle станут источником `EVD` Trace Records с типизированными ID; физический формат записей остаётся validation obligation схемы, здесь не предвосхищается.
-- **Retention obligation (commit-pinned links)**: ссылки на системный индекс (`a7f927c`) и execution evidence (`22b8990`) указывают на коммиты, живущие только на исследовательских ветках `research/v1-system-evidence` и `research/v1-execution-evidence`. До удаления этих веток их содержимое должно быть промоутнуто в `main` (естественное продолжение issues 11/44) либо коммиты закреплены durable ref-ом; иначе pinned-ссылки станут 404 и нарушат provenance-требование issue 5.
+- **Retention obligation (commit-pinned links)**: выполнена (issue 55) — системный индекс и execution evidence промоутнуты в `main` (`docs/research/v1-system-evidence-index.md`, `docs/research/v1-execution-evidence.md`), ссылки ниже переведены на относительные; research-ветки `research/v1-system-evidence` и `research/v1-execution-evidence` больше не являются источником доступа к evidence и могут быть удалены без 404 (provenance-требование issue 5 соблюдено).
 
 ## Research snapshot
 
@@ -46,8 +46,8 @@ Bundle покрывает все 13 root operation types каталога V3, у
 
 Общие факты живут в канонических items системного индекса и execution evidence; этот bundle фиксирует только их локальное применение:
 
-- [Системный индекс свидетельств production-кода V1](https://github.com/Driadix/ShuttleControllerV3/blob/a7f927c6d3b44d58a2ae16feb3f386f0569a74df/docs/research/v1-system-evidence-index.md) (issue 3, commit-pinned): command/operation surface, двойная state representation (`status`/`currentOperation`/`CoreOpMode`), shared I2C/CAN ownership, configuration/persistence, профили 800/1000/1200, faults/warnings/recovery, blocking-работа.
-- [V1 execution timing and resource evidence](https://github.com/Driadix/ShuttleControllerV3/blob/22b8990637c5fa2a84080ed73c401980637e783f/docs/research/v1-execution-evidence.md) (issue 11, commit-pinned): items `T01-T13`, `C01-C04` - configured/inferred тайминги и отсутствие measured worst-case bounds; кооперативный `SystemYield()` как единственный watchdog/safety/communication pump.
+- [Системный индекс свидетельств production-кода V1](./v1-system-evidence-index.md) (issue 3): command/operation surface, двойная state representation (`status`/`currentOperation`/`CoreOpMode`), shared I2C/CAN ownership, configuration/persistence, профили 800/1000/1200, faults/warnings/recovery, blocking-работа.
+- [V1 execution timing and resource evidence](./v1-execution-evidence.md) (issue 11): items `T01-T13`, `C01-C04` - configured/inferred тайминги и отсутствие measured worst-case bounds; кооперативный `SystemYield()` как единственный watchdog/safety/communication pump.
 - [Общий semantic contract операций V3](https://github.com/Driadix/ShuttleControllerV3/issues/13) - нормативный контекст V3; evidence ниже не переопределяет его, только сверяется с ним в disposition.
 
 Дельты, найденные этим bundle относительно системного индекса, фиксируются в разделах операций явно (например: недостижимость branch-а `WARN_CHANNEL_FULL` в одиночной загрузке из-за обнуления `lastPalletePosition` при приёме команды; `CMD_EVACUATE_ON` отвергается парсером - production behavior отсутствует).
@@ -1868,7 +1868,7 @@ Evidence SHA: `708d090980155d4a8d4644f7bcf87c383e81cd1d`. HEAD зеркала `4
 5. Восстановление encoder-калибровки из flash закомментировано (`L7612-L7615`): после reboot действует дефолт {40x8}; ToF-калибровка при этом восстанавливается (`L7616-L7620`).
 6. Восстановление `inverse` после CMD_CALIBRATE отсутствует (`L7240`, `L7358`).
 
-Обновление `research/v1-system-evidence-index.md` выполнено отдельным шагом (issue 44, commit `a7f927c`) с impact review per-operation tickets #17-#29.
+Обновление `docs/research/v1-system-evidence-index.md` выполнено отдельным шагом (issue 44) с impact review per-operation tickets #17-#29; в `main` файл промоутнут тикетом issue 55.
 
 ## Независимый checklist-review по gate legacy evidence ready
 

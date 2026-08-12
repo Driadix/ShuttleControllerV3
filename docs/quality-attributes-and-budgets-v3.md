@@ -183,5 +183,5 @@ MTU = **128 B** (V1 keep, оба профиля). Бюджеты фиксиро�
 - `docs/software-architecture-boundaries-v3.md` (#43) — freshness-суб-бюджеты, watchdog-формула, классы очередей, 15 validation obligations.
 - `docs/external-semantic-transport-contracts-v3.md` (#47) — MTU/бюджеты deferred → этот документ; authorityId, BusyRejected.
 - Issue 8 — item 9, gate G4; issue 10 — proving slice; тикет #54 — исполнение измерений.
-- V1 evidence: системный индекс (`a7f927c`), execution evidence (`22b8990`), research-фактшит семантики скоростей/конфигурации (commit `4a226e5`).
+- V1 evidence: [системный индекс](./research/v1-system-evidence-index.md), [execution evidence](./research/v1-execution-evidence.md), research-фактшит семантики скоростей/конфигурации (V1 commit `4a226e5`).
 - Индустриальные источники: IEC 61508-2:2010 (§7.4.4.1.4, §7.4.8.3, Table A.10), IEC 60730-1 Annex H (Class B), ISO 13849-1:2023, ISO 3691-4:2023 (Annex A), IEC 61800-5-2:2016, Liu & Layland 1973, NASA SWEHB 9.12, ZVEI Best-Practice v2, Keil AN316, AUTOSAR SWS DEM.
