@@ -27,31 +27,47 @@ namespace
 
 // Single writer: TIM2 ISR (rule R2 - ISR writes only its own slots).
 volatile std::uint64_t g_now_ms = 0; // 1 ms tick counter
-volatile std::uint32_t g_cyccnt_high = 0; // wrap extension of DWT->CYCCNT
-std::uint32_t g_prev_cyccnt = 0; // ISR-private previous sample
 HardwareTimer g_tim2(TIM2);
+
+// Seqlock-guarded cycle state. The ISR publishes (cycles64, prev_cyccnt)
+// atomically via the sequence counter (even = consistent); readers snapshot
+// and retry on mismatch or while odd. cycles64 accumulates wrap-safe uint32
+// deltas, so it is monotonic and epoch-safe; the live CYCCNT read adds
+// sub-ms precision (the 1 ms quantization alone would collapse ISR-latency
+// and step-duration measurements into 0/1000 us bins).
+struct CycleState
+{
+    std::uint64_t cycles = 0;
+    std::uint32_t prev_cyccnt = 0;
+    std::uint32_t seq = 0; // even = consistent snapshot
+};
+volatile CycleState g_cycle;
 
 void on_tick()
 {
     ++g_now_ms;
 
-    // Extend the 32-bit cycle counter across wraps: the ISR samples every
-    // 1 ms (~168000 cycles), so a wrap is exactly when the new sample is
-    // smaller than the previous one.
+    // Publish (cycles, prev) as a consistent pair: seq odd while writing.
     const std::uint32_t cyccnt = DWT->CYCCNT;
-    if (cyccnt < g_prev_cyccnt)
-    {
-        ++g_cyccnt_high;
-    }
-    g_prev_cyccnt = cyccnt;
+    ++g_cycle.seq; // odd: writer in progress
+    g_cycle.cycles += static_cast<std::uint32_t>(cyccnt - g_cycle.prev_cyccnt);
+    g_cycle.prev_cyccnt = cyccnt;
+    ++g_cycle.seq; // even: consistent
 }
 
-// Read-twice-and-compare for a 64-bit value written only by the ISR.
+// Read-twice-and-compare with bounded retry: the ISR is the only writer, so a
+// torn interleave is detected by mismatched reads and retried (single-word
+// writes are atomic on Cortex-M4).
 std::uint64_t read64(const volatile std::uint64_t& v)
 {
-    const std::uint64_t a = v;
-    const std::uint64_t b = v;
-    return a == b ? a : v; // retry once; ISR writes are single-word-ordered
+    std::uint64_t a = v;
+    std::uint64_t b = v;
+    while (a != b)
+    {
+        a = v;
+        b = v;
+    }
+    return a;
 }
 
 } // namespace
@@ -64,7 +80,9 @@ void init()
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
     g_now_ms = 0;
-    g_cyccnt_high = 0;
+    g_cycle.seq = 0;
+    g_cycle.cycles = 0;
+    g_cycle.prev_cyccnt = 0;
 
     g_tim2.setOverflow(1000, MICROSEC_FORMAT); // 1 ms
     g_tim2.attachInterrupt(on_tick);
@@ -75,12 +93,32 @@ std::uint64_t now_ms() { return read64(g_now_ms); }
 
 std::uint64_t ticks_us()
 {
-    // 64-bit cycles = high_word : DWT->CYCCNT; / 168 MHz => microseconds.
-    const std::uint32_t high1 = g_cyccnt_high;
-    const std::uint32_t low = DWT->CYCCNT;
-    const std::uint32_t high2 = g_cyccnt_high;
-    const std::uint32_t high = (high1 == high2) ? high1 : high2; // torn read retry
-    return (static_cast<std::uint64_t>(high) << 32 | low) / 168;
+    // Seqlock snapshot: a consistent (cycles, prev) pair, then the live
+    // CYCCNT delta for sub-ms precision. Retry while the ISR is mid-write
+    // (odd seq) or the snapshot changed (seq mismatch). Member reads of the
+    // volatile struct are volatile-qualified (no struct copy assignment).
+    const auto snapshot = []() {
+        CycleState s;
+        s.seq = g_cycle.seq;
+        s.cycles = g_cycle.cycles;
+        s.prev_cyccnt = g_cycle.prev_cyccnt;
+        return s;
+    };
+
+    CycleState s1;
+    CycleState s2;
+    do
+    {
+        do
+        {
+            s1 = snapshot();
+        } while ((s1.seq & 1u) != 0); // odd: writer in progress
+        s2 = snapshot();
+    } while (s1.seq != s2.seq || s1.cycles != s2.cycles || s1.prev_cyccnt != s2.prev_cyccnt);
+
+    const std::uint32_t live = DWT->CYCCNT;
+    const std::uint64_t cycles = s1.cycles + static_cast<std::uint32_t>(live - s1.prev_cyccnt);
+    return cycles / 168; // 168 MHz => us
 }
 
 void test_set_time_ms(std::uint64_t) {}

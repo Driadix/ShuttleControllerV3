@@ -35,9 +35,10 @@ coop::StepRing g_ring;
 //   handler must be ISR-safe: bxCAN mailbox write is register-level.
 // - Repeated edges while pending collapse into one emission (Q7.2).
 volatile bool g_force_stop_pending = false;
-std::uint64_t g_force_stop_latched_us = 0;
-std::uint64_t g_force_stop_served_us = 0;
 std::uint32_t g_force_stop_count = 0;
+// T_fs delta (latch -> emission), computed in ISR context into a single
+// 32-bit slot: atomic on Cortex-M4, no torn 64-bit read (obligation #3).
+volatile std::uint32_t g_last_force_stop_latency_us = 0;
 
 // CAN emitter registered by the harness (invoked from ISR context).
 StepFn g_force_stop_handler = nullptr;
@@ -58,13 +59,13 @@ void force_stop_isr()
     if (!g_force_stop_pending)
     {
         g_force_stop_pending = true;
-        g_force_stop_latched_us = monotonic::ticks_us();
+        const std::uint64_t latched = monotonic::ticks_us();
         ++g_force_stop_count;
         if (g_force_stop_handler != nullptr)
         {
             g_force_stop_handler(g_force_stop_handler_ctx); // ISR-safe emission
         }
-        g_force_stop_served_us = monotonic::ticks_us();
+        g_last_force_stop_latency_us = static_cast<std::uint32_t>(monotonic::ticks_us() - latched);
         g_force_stop_pending = false; // collapsed; next edge emits again
     }
     // While pending (already emitting), repeated edges collapse (Q7.2).
@@ -128,7 +129,7 @@ std::uint64_t max_scheduler_gap_ms() { return g_max_gap_ms; }
 std::uint64_t idle_ticks() { return g_idle_ticks; }
 
 // Force-stop observables (obligation #3/#13: T_fs = latch -> served).
-std::uint64_t force_stop_latency_us() { return g_force_stop_served_us - g_force_stop_latched_us; }
+std::uint64_t force_stop_latency_us() { return g_last_force_stop_latency_us; }
 std::uint32_t force_stop_count() { return g_force_stop_count; }
 
 void run()
@@ -137,7 +138,11 @@ void run()
     {
         on_tick();
 #ifdef __arm__
-        __asm__ volatile("wfi");
+        const std::uint64_t deadline = monotonic::now_ms() + 1;
+        while (monotonic::now_ms() < deadline)
+        {
+            __asm__ volatile("wfi"); // wait for the tick to advance
+        }
 #else
         // Host: tests drive on_tick() directly.
 #endif
