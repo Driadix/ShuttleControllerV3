@@ -148,7 +148,7 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 
 ### 7.1 Evidence records
 
-Каждый verification activity → evidence record: `{ID (V-<n>), тип (review/analysis/test/measurement/commissioning), refs (requirements/hazards/obligations), method, oracle, environment, результат, source/version/confidence, owner, дата}`. Автоматические прогоны — CI-артефакты (JUnit/JSON/logs), на которые records ссылаются. Паттерн #53 (commit-pinned evidence assets) + формализация полей. Измерения — с workload metadata.
+Каждый verification activity → evidence record: `{ID (V-<n>), тип (review/analysis/test/measurement/commissioning), refs (requirements/hazards/obligations), method, oracle, environment, результат, source/version/confidence, owner, дата}`. Автоматические прогоны — CI-артефакты (JUnit/JSON/logs), на которые records ссылаются. Паттерн #53/#55 (main-resident evidence assets с относительными ссылками; commit-pinning - только для внешних ассетов; исторические ссылки защищены тегами `evidence/*`) + формализация полей. Измерения — с workload metadata.
 
 ### 7.2 Approval
 
