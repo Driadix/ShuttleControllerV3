@@ -86,7 +86,7 @@
 | Класс | Параметры | Источник/валидация |
 | --- | --- | --- |
 | Identity | `shuttleNum` 1..32 (0 = unprovisioned) | provisioning; диапазон; радио-адрес 0x01xx производный |
-| Профиль | `profileId` 800/1000/1200 — firmware-resident bundle (не NVM-редактируемый) | выбор валидируется; U07 (фактическое распределение профилей в поле) — владелец + полевые данные, non-blocking |
+| Профиль | `profileId` 800/1000/1200 - firmware-resident bundle универсального app image (не NVM-редактируемый) | выбор валидируется по supported set и release qualification; U07 (фактическое распределение профилей в поле) - владелец + полевые данные, non-blocking |
 | Геометрия | wheel radius и др. параметры геометрии | provisioning; диапазоны; кросс-инварианты профиль↔геометрия; смена → пере-выполнение calibration validity gate |
 | Калибровка | encoder-таблицы F/R, sensor-калибровка, offsets, ToF-калибровка | раздел 7 |
 | Stats | lifetime-счётчики (Backup SRAM + суточная flash-копия в s11, #49) | Persistence adapter |
@@ -97,6 +97,16 @@
 ### 6.3 Валидация
 
 Per-param диапазоны на admission (reject-коды #47); кросс-инварианты профиль↔геометрия; plausibility калибровки (validity gate, раздел 7). Все изменения конфигурации — mutating service (guards раздел 9).
+
+### 6.4 Support, qualification и active profile
+
+- `supportedProfileIds` - профили, чьи bundles реализованы данным универсальным app image; для V3 это `{800, 1000, 1200}`. Наличие bundle не является production-допуском.
+- `qualifiedProfileIds` - подмножество поддерживаемых профилей, прошедших acceptance для конкретного app image. Множество находится в header-covered payload и аутентифицируется существующей ECDSA-P256 подписью образа; отдельного signed manifest и новой key hierarchy нет. `app_A` и `app_B` одного релиза обязаны содержать одинаковое множество. Внешний SHA256-манифест только отражает значение как release evidence.
+- `configuredProfileId` - профиль, записанный в persisted-конфигурации устройства. Он сохраняется при загрузке несовместимого fallback image, чтобы совместимый signed image мог восстановить работу без подмены механического контракта.
+- `activeProfileId` - производное runtime-значение: равно `configuredProfileId`, только если тот входит в `qualifiedProfileIds`; иначе отсутствует. Инвариант Serving motion: `activeProfileId` существует.
+- В `v1.0.0` qualification set содержит ровно один профиль, выбранный по физически доступному шаттлу на gate входа в Фазу 3. Config/provisioning/re-provisioning непрошедшего qualification профиля возвращает `ProfileNotQualified` до journal commit; RAM-состояние, journal и lifecycle state не изменяются. Service grant и FactoryReset не расширяют qualification set.
+- Identity/query/diagnostics различают supported, qualified, configured и active profile. Точные wire ids регистрируются в item 6 без изменения этой семантики.
+- Qualification принадлежит конкретному app image и не наследуется автоматически по semver. Новый release переносит профиль только после trace impact analysis, затронутых физических проверок и общего regression.
 
 ## 7. Калибровка: персистентность end-to-end
 
@@ -149,7 +159,7 @@ Brake-тест (Q7.1 A) + ТО re-test — процедура сервисног
 
 ### 10.2 Initial provisioning (network_bridge)
 
-Service authority (grant); flow: присвоение `shuttleNum` (1..32) + выбор профиля (валидация firmware-resident bundle) + геометрия → **атомарный journal-commit одной снапшот-записью provisioning-блока (C6)** → `Provisioned` (power-cut mid-record → CRC-невалиден → предыдущая запись остаётся, F3). Калибровка — после, операцией Calibrate (требует Provisioned, #46). Bridge-only: присвоение identity по недоверенному radio = spoofing-вектор.
+Service authority (grant); flow: присвоение `shuttleNum` (1..32) + выбор профиля (валидация firmware-resident bundle и membership в `qualifiedProfileIds`, §6.4) + геометрия → **атомарный journal-commit одной снапшот-записью provisioning-блока (C6)** → `Provisioned` (power-cut mid-record → CRC-невалиден → предыдущая запись остаётся, F3). `ProfileNotQualified` возвращается до записи и не меняет RAM/journal/lifecycle. Калибровка - после, операцией Calibrate (требует Provisioned, #46). Bridge-only: присвоение identity по недоверенному radio = spoofing-вектор.
 
 ### 10.3 Re-provisioning (bridge)
 
@@ -165,7 +175,7 @@ Service authority (grant); flow: присвоение `shuttleNum` (1..32) + в�
 
 ### 10.5 Смена геометрии/профиля
 
-Validity gate калибровки пере-выполняется (раздел 7); невалид → Degraded + рекалибровка.
+До commit новый профиль проверяется по `qualifiedProfileIds`; `ProfileNotQualified` не меняет состояние. После успешной смены validity gate калибровки пере-выполняется (раздел 7); невалид → Degraded + рекалибровка.
 
 ### 10.6 Комиссионирование (процедура)
 
@@ -181,6 +191,7 @@ Validity gate калибровки пере-выполняется (раздел
 - Window-handoff: `Update → Serving` при оси ∈ {Committed, RolledBack, Aborted}; commit происходит в первые тики после активации — длинного окна Update после boot нет.
 - Epoch: runtime-сущности умирают; persisted (config, status, markers) — не зависят (#46 I-LC-6).
 - Fault при активном update в Staging → Aborted (окно Serving, health Fault); в Applying невозможен (¬Fault на входе, quiescence C6).
+- **Image/profile gate при update и boot**: admission ручного update/rollback отвергает target image, если его authenticated `qualifiedProfileIds` не содержит persisted `configuredProfileId`. Boot повторяет проверку независимо и производит `activeProfileId` только при membership. Неизбежный auto-fallback на несовместимый ранее committed image сохраняет journal и `configuredProfileId`, оставляет `activeProfileId` отсутствующим, блокирует motion и входит в окно `Recovery` с причиной `ProfileQualificationMismatch`; разрешены read-only diagnostics и Update-class установка совместимого signed image. Автосмена профиля, очистка journal и default profile запрещены.
 - Удаление research-веток и commit-pinned evidence — #55 (не зависит от этого документа).
 
 ## 12. Validation obligations (вне этого тикета, владельцы)
@@ -193,6 +204,7 @@ Validity gate калибровки пере-выполняется (раздел
 | VBAT/LSE проводка, старт осциллятора, удержание при power-off, дрейф RTC | commissioning, hardware |
 | Power-cut во время update (staging/applying) — обязательный тест | #52/#54 (acceptance #50) |
 | Contract-тесты: A/B artifact load_address mismatch; pointer/pending/commit; bootcount exhaustion → rollback; FactoryReset generation-bump; ClearFault admission; **Finalize не повышает accepted_counter; commit повышает атомарно; rollback к меньшему counter → DowngradeDenied; фолбэк bootloader персистируется (указатель == исполняемый слот); rollback_flag → событие rollback-причина; power-cut mid-provisioning → старый снапшот; power-cut mid-GC s7 → HZ-14-путь; JournalFull → reject + событие; status sector-full → boot без bootcount (деградация)** | verification pyramid #52 |
+| Profile qualification: одинаковый authenticated `qualifiedProfileIds` в app_A/app_B; tamper подписи/metadata; `ProfileNotQualified` для initial/re-provisioning без изменения RAM, journal и lifecycle; power-cut не создает partial profile state; несовместимый manual rollback/update по `configuredProfileId` отклонен; несовместимый auto-fallback сохраняет `configuredProfileId`, оставляет `activeProfileId` отсутствующим и входит в `Recovery` + motion lock; совместимый recovery update восстанавливает active profile и Serving | verification pyramid #52; каждый release |
 | U04-остатки (формула нормализации, среда калибровки) | гейт контракта Calibrate #40 |
 | U07 (фактическое распределение профилей), U01 (единицы приводов) | владелец + полевые данные |
 
@@ -210,6 +222,10 @@ Validity gate калибровки пере-выполняется (раздел
 | V1-ротация 256×512 Б | multi-page калибровка; два формата журнала | Q4 |
 | Auto-save конфигурации (V1 deferred) | неявные записи; #47 даёт явный persist-intent | Q4 |
 | NVM-редактируемые профили | профиль — контракт железа | Q4 |
+| Отдельный binary на профиль | нарушает универсальную configurable firmware, создает SKU/build matrix и риск дрейфа | решение [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) |
+| Warning или Degraded после выбора неквалифицированного профиля | не является production boundary; persisted config становится несовместимым с release | решение [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) |
+| Отдельный signed qualification artifact или service-managed allowlist | второй trust/lifecycle path; operator authorization не заменяет release acceptance | key-модель §4; решение [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) |
+| Автосмена active profile при rollback/fallback | firmware не вправе менять контракт физической механики | решение [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) |
 | Полный provisioning по radio | spoofing при channel-trust (кроме смены номера — требование) | Q8 |
 | Авто-провижининг по UID96 | складская логика — за shuttleNum | Q8 |
 

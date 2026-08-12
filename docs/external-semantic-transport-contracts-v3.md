@@ -126,10 +126,12 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - `protocolVersion` (major.minor.patch wire encoding);
 - `controllerEpoch`;
 - `firmwareIdentity` (type/build id opaque);
-- `effectiveProfileId` (controller-derived from ingress; authoritative);
+- `effectiveProfileId` (controller-derived **transport profile** from ingress; authoritative);
 - `supportedCapabilities` (bitmask/set);
 - profile-relevant limit flags (без обязательных чисел budgets — они в #48, могут advertise как opaque limit class later);
 - assigned `authorityId` + **granted** role set / capability grant for this principal (controller-authored).
+
+`effectiveProfileId`/`expectedProfileId` в handshake относятся только к транспортным профилям `network_bridge` и `radio`; они не являются профилем шаттла и не переименовываются в shuttle-profile query.
 
 **Client → controller (hello / interest):**
 
@@ -145,6 +147,18 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - Если client прислал `expectedProfileId` и оно ≠ `effectiveProfileId` → handshake/request reject `ProfileMismatch` (стабильный код).
 - Controller advertise в handshake/ACK включает `effectiveProfileId`, который client обязан учитывать.
 - Все hard profile rules (Update-class, budgets, framing expectations) применяются к **effective** profile.
+
+### 5.2 Shuttle profile status query
+
+Read-only identity/query snapshot различает профиль шаттла от transport profile и возвращает:
+
+- `supportedShuttleProfileIds`: firmware-resident bundles универсального app image (`800`, `1000`, `1200`);
+- `qualifiedShuttleProfileIds`: подмножество, аутентифицированное подписью текущего app image и допущенное его release evidence;
+- `configuredShuttleProfileId`: optional persisted выбор устройства; сохраняется при несовместимом fallback image;
+- `activeShuttleProfileId`: optional runtime-профиль; присутствует только когда configured id входит в qualified set, иначе отсутствует;
+- `shuttleProfileStatus`: `Unconfigured | Active | QualificationMismatch`.
+
+Config/provisioning принимает shuttle profile id только из qualified set. Транспортные `effectiveProfileId`, `expectedProfileId`, `ProfileDenied` и `ProfileMismatch` не используются для этого решения.
 
 **Назначение principal / `authorityId` (channel-trust, без crypto session на wire контроллера):**
 
@@ -367,6 +381,7 @@ Minimum set (extensible):
 - `ProvisioningGate`
 - `ProfileDenied` (e.g. Update on effective radio)
 - `ProfileMismatch` (client `expectedProfileId` ≠ controller `effectiveProfileId`)
+- `ProfileNotQualified` (`configured/requestedShuttleProfileId` поддерживается binary, но отсутствует в `qualifiedShuttleProfileIds`; reject выполняется до изменения RAM, journal или lifecycle)
 - `SequenceStale`
 - `BusyRejected` (class full)  
   (plus type-precondition codes as catalog evolves)
@@ -381,6 +396,10 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 - **Wire codes + latch/timed attributes** owned here (item 6).
 - Clients must not need hidden firmware strings to interpret safety-relevant state.
 - Initial mapping from V1 bitmasks is evidence for disposition preserve/change/exclude; V1 codes not frozen by wire-compat.
+
+### 16.5 LifecycleRecoveryReason
+
+- `ProfileQualificationMismatch` - persisted configured shuttle profile не квалифицирован загруженным fallback image; active shuttle profile отсутствует, mutating motion admission закрыт, recovery требует совместимого signed image.
 
 ## 17. Stop and safety visibility (Q25)
 

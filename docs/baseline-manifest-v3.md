@@ -13,25 +13,27 @@
 | 3 | Stakeholder & System Requirements | распределены: `docs/semantic-contract-v3.md`, `docs/quality-attributes-and-budgets-v3.md`, per-operation docs | см. items 4/6/9 | #2, #9, #13 | G1 | Approved (распределённый) | владелец |
 | 4 | Capability & Operation Contracts | `docs/semantic-contract-v3.md` + 14 algorithmic docs (#16, #30-42) | `1cd2f1b`; algorithmic docs `7873943` (группа) | #13, #16, #30-42, #9, #14 | G1 | Approved | владелец |
 | 5 | Safety & Health | `docs/safety-model-v3.md` | `1b08bb8` | #45 | G2 | Approved | владелец |
-| 6 | External Semantic & Transport Contracts | `docs/external-semantic-transport-contracts-v3.md` | `a2544b3` | #47 | G3 | Approved | владелец |
-| 7 | Configuration, Identity & Lifecycle | `docs/configuration-identity-lifecycle-v3.md` + `docs/lifecycle-axes-v3.md` | `fe1b9ef`; `a2544b3` | #50, #46 | G2/G3 | Approved | владелец |
+| 6 | External Semantic & Transport Contracts | `docs/external-semantic-transport-contracts-v3.md` | pending rebaseline revision | #47, #59 | G3 | In Review (profile qualification rebaseline) | pending review/closure #59 |
+| 7 | Configuration, Identity & Lifecycle | `docs/configuration-identity-lifecycle-v3.md` + `docs/lifecycle-axes-v3.md` | pending rebaseline revision; `a2544b3` | #50, #46, #59 | G2/G3 | In Review (profile qualification rebaseline) | pending review/closure #59 |
 | 8 | Observability & Diagnostics | `docs/observability-architecture-v3.md` | `9e9c48b` | #49 | G3 | Approved | владелец |
 | 9 | Quality Attributes & Budgets | `docs/quality-attributes-and-budgets-v3.md` | `1b08bb8` | #48 | G4 | Approved | владелец |
 | 10 | Software Architecture | `docs/software-architecture-boundaries-v3.md` + issue 10 (execution) + `docs/proving-slice-v3.md` | `1b08bb8`; issue 10 resolution; `9c045f1` | #43, #10, #54 | G4 | Approved (execution conditional, host-only evidence) | владелец |
 | 11 | Engineering & Release | `docs/engineering-and-release-baseline-v3.md` | `1b08bb8` | #51 | G5 | Approved | владелец |
-| 12 | Verification Strategy & Acceptance | `docs/verification-strategy-v3.md` | `de4ca18` | #52 | G5 | Approved | владелец |
-| 13 | Implementation Plan | `docs/implementation-plan-v3.md` | commit при закрытии #57 | #57 | G6 | Approved | владелец |
+| 12 | Verification Strategy & Acceptance | `docs/verification-strategy-v3.md` | pending rebaseline revision | #52, #59 | G5 | In Review (profile qualification rebaseline) | pending review/closure #59 |
+| 13 | Implementation Plan | `docs/implementation-plan-v3.md` | pending rebaseline revision | #57, #59 | G6 | In Review (profile qualification rebaseline) | pending review/closure #59 |
 
 Evidence assets (класс Evidence, #8 §2): `docs/research/v1-system-evidence-index.md` (тег `evidence/v1-system-evidence-index`), `docs/research/v1-execution-evidence.md` (`evidence/v1-execution-evidence`), `docs/research/v3-capability-evidence-slices.md` (`evidence/v3-capability-evidence-slices`), `docs/research/proving-slice-report.md` (host-only, #54), `docs/proving-slice-v3.md` (design, #54).
+
+Profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): единый binary сохраняет supported profiles 800/1000/1200; production qualification принадлежит конкретному signed app image; `v1.0.0` получает singleton qualification target на gate Фазы 3; wire/lifecycle/verification/implementation items изменены согласованно.
 
 ## 2. Status matrix (по классам #8 §2)
 
 | Класс | Покрытие | Статус |
 | --- | --- | --- |
-| Normative (13 items) | все items утверждены на своих gates | Approved |
+| Normative (13 items) | items 6, 7, 12 и 13 изменены profile qualification rebaseline | In Review до независимого review и закрытия [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); остальные items Approved |
 | Evidence | V1-индексы, capability slices, proving slice отчёт | verified (independent review) |
 | Governance | issue 8, triage/hitl/domain conventions, change classes | Approved |
-| Derived Views | настоящий manifest + матрицы §3-4 | G6 closure |
+| Derived Views | настоящий manifest + матрицы §3-4 | In Review вместе с profile qualification rebaseline |
 
 ## 3. Trace matrix: hazards → verification (полная таблица - `docs/verification-strategy-v3.md` §4)
 
@@ -72,13 +74,13 @@ Evidence assets (класс Evidence, #8 §2): `docs/research/v1-system-evidence
 
 ## 5. G6 closure (issue 8 §6)
 
-- [x] Baseline Manifest фиксирует ревизии 13 items, gates, approval.
+- [ ] Baseline Manifest фиксирует main revisions и approval 13 items - profile qualification revisions items 6, 7, 12 и 13 pending до merge/закрытия #59.
 - [x] Derived views: trace (hazard → verification → модуль), status (item/class), coverage (obligations → модули).
 - [x] Orphan/uncovered: каждый obligation имеет модуль и статус; каждый модуль имеет acceptance (§3 implementation-plan).
 - [x] Schema-чеки: markdownlint-clean, относительные ссылки, без TBD.
-- [x] Блокирующие решения: нет открытых (все тикеты карты закрыты; execution conditional зафиксирован).
-- [x] Independent review: при закрытии #56/#57.
-- [x] Owner approval: gate G6 (тикет #56).
+- [ ] Блокирующие решения: profile qualification rebaseline открыт в [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59).
+- [ ] Independent review profile qualification rebaseline: pending; исходные review #56/#57 сохраняют историческую силу только для предыдущих revisions.
+- [ ] Owner approval profile qualification rebaseline: pending closure #59; исходный gate G6 approval #56 относится к предыдущим revisions.
 
 ## 6. Ссылки
 
