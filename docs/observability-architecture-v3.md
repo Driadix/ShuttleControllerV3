@@ -1,6 +1,6 @@
 # Архитектура наблюдаемости V3 (Observability Architecture)
 
-Статус: **утверждено владельцем (гриллинг Q1–Q3, тикет «Спроектировать архитектуру наблюдаемости V3» (#49 карты #1)) + независимое экспертное ревью (5 MAJOR, 5 MINOR, 1 NIT — все учтены)**. Вход в logical item 8 (`Observability & Diagnostics`) нормативного пакета (issue 8, gate G4) и в architecture proving slice (тикет #54).
+Статус: **In Review - shuttle-profile snapshot rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем и независимо reviewed в тикете [«Спроектировать архитектуру наблюдаемости V3»](https://github.com/Driadix/ShuttleControllerV3/issues/49)**. Вход в logical item 8 (`Observability & Diagnostics`) нормативного пакета (issue 8, gate G4) и в architecture proving slice (тикет #54).
 
 Термины — канонические из `CONTEXT.md`: Подписка, Транспортный профиль, Controller Epoch, Outcome операции, Платформенное окно. Исполнение — cooperative scheduler с bounded run-to-completion steps (issue 10), ports-and-adapters (#43), lifecycle-оси (#46), численные бюджеты — `docs/quality-attributes-and-budgets-v3.md` (#48).
 
@@ -71,7 +71,7 @@ Freshness-класс: wall-время не несёт (порядок — tick),
 
 ### 2.6 Query snapshot — авторитетная реконсиляция
 
-Единый документ состояния: `version` (u32, monotonic +1 на изменение), `controllerEpoch`, `wallTime` + `timeValidity`, identity (firmware version, build id, hardware id, serial — A6), платформенное окно (#46), health (#45), provisioning-статус, сводка дерева операций, sensing (position, freshness), actuator commanded, battery, faultMask/warningMask, счётчики (§6), профиль 800/1000/1200. Размер документа bounded ≤ 512 Б.
+Единый документ состояния: `version` (u32, monotonic +1 на изменение), `controllerEpoch`, `wallTime` + `timeValidity`, identity (firmware version, build id, hardware id, serial — A6), shuttle-profile status из item 6 §5.2 (`supportedShuttleProfileIds`, `qualifiedShuttleProfileIds`, optional `configuredShuttleProfileId`, optional `activeShuttleProfileId`, `shuttleProfileStatus`), платформенное окно (#46), health (#45), provisioning-статус, сводка дерева операций, sensing (position, freshness), actuator commanded, battery, faultMask/warningMask, счётчики (§6). Одиночное поле `profile` не используется; состояние `QualificationMismatch` сохраняет configured id при отсутствии active id. Размер документа bounded ≤ 512 Б.
 
 Доставка — фрагментами ≤ MTU 128 Б (`Snapshot fragments`, #47 §7); **framing: `fragmentIndex` u8 + `fragmentCount` u8 в каждом фрагменте** (ревью MAJOR-4); version+epoch — fencing против устаревших snapshot'ов (паттерн AWS Shadow: старые версии отбрасываются).
 

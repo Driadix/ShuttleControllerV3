@@ -1,6 +1,6 @@
 # Verification Strategy & Acceptance V3 (Verification Pyramid, item 12)
 
-Статус: **решения владельца приняты (гриллинг Q1–Q6 + SIL-вопрос, тикет [«Спроектировать verification pyramid V3 (item 12)»](https://github.com/Driadix/ShuttleControllerV3/issues/52)); независимое ревью проведено (2 MAJOR / 5 MINOR / 5 NIT, 0 BLOCKING — все учтены); финализация при закрытии #52.** Вход в logical item `Verification Strategy & Acceptance` нормативного пакета (issue 8, gate G5) и в architecture proving slice (тикет #54). Каждый метод, oracle и бюджет имеет источник; бюджеты-лимиты — из `docs/quality-attributes-and-budgets-v3.md` (#48).
+Статус: **In Review - profile qualification acceptance rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем и независимо reviewed в тикете [«Спроектировать verification pyramid V3 (item 12)»](https://github.com/Driadix/ShuttleControllerV3/issues/52)**. Вход в logical item `Verification Strategy & Acceptance` нормативного пакета (issue 8, gate G5) и в architecture proving slice (тикет #54). Каждый метод, oracle и бюджет имеет источник; бюджеты-лимиты - из `docs/quality-attributes-and-budgets-v3.md` (#48).
 
 Термины — канонические из `CONTEXT.md`. Исполнение — cooperative scheduler с bounded run-to-completion steps (issue 10), ports-and-adapters (#43), safety-модель (#45), наблюдаемость (#49), production lifecycle (#50).
 
@@ -164,8 +164,15 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 3. L5 acceptance report: 6 обязательных acceptance + as-needed прогоны (workload metadata);
 4. Link map / per-function stack / CPU / RAM high-water report;
 5. Evidence refs: закрытые obligations #43/#48/#49/#50;
-6. Build artifacts + attestation (#51 §11) + SHA256-манифест;
+6. Build artifacts + attestation (#51 §11) + `SHA256SUMS.txt` + `PROFILE-QUALIFICATION.json` (#51 §9.2);
 7. Review records (включая verification-evidence review) + owner sign-off.
+
+### 7.4 Profile qualification evidence
+
+- Каждый release независимо объявляет `qualifiedProfileIds`, аутентифицированный подписью app image. Внешний `PROFILE-QUALIFICATION.json` (#51 §9.2) зеркалирует множество, связывает оба slot-артефакта с их SHA256 и evidence records и включается в `SHA256SUMS.txt`; он является evidence, а не trust root.
+- `v1.0.0` квалифицирует ровно один профиль. Добавление профиля в future minor-release требует trace-based Profile Qualification Campaign: полный профильный L5/HIL и field/commissioning набор; все safety timing measurements и capability boundary scenarios, зависящие от геометрии, массы, приводов, торможения, sensor placement, calibration или tuning; полный host regression и обязательные release checks нового binary.
+- Profile-neutral evidence переиспользуется только через trace impact analysis. Qualification не наследуется автоматически по semver: для каждого переносимого профиля повторяются затронутые физические проверки плюс общий regression, а незатронутое evidence переиспользуется ссылкой.
+- Обязательные negative/lifecycle сценарии каждого release: одинаковое `qualifiedProfileIds` в app_A/app_B; metadata покрыта подписью; `ProfileNotQualified` не меняет RAM, journal и lifecycle при initial/re-provisioning; power-cut не создает partial profile state; target-image admission сверяет persisted `configuredProfileId`; несовместимый manual rollback/update отклонен; несовместимый auto-fallback сохраняет configured profile, оставляет active profile отсутствующим и дает `Recovery` + motion lock; совместимый recovery update восстанавливает active profile и Serving.
 
 ## 8. Regression strategy (Q6)
 
@@ -173,7 +180,7 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 | --- | --- |
 | PR/merge | L1 + L2 + L3 (весь host-слой, CI) |
 | Nightly | L4 bench-suite (bounded steps, high-water, журналы, verified-boot smoke) |
-| Release `v*` | L5 обязательные 6 acceptance + as-needed по impact + полный L4 + host-слой |
+| Release `v*` | L5 обязательные 6 acceptance + as-needed по impact + полный L4 + host-слой + Profile Qualification Campaign/impact carryforward (§7.4) для каждого заявленного профиля |
 | Hotfix/patch | trace-based селекция (тесты затронутых модулей) + обязательные L5 при изменении safety-пути |
 
 Селекция по классу изменения (#8 §9):
@@ -226,7 +233,8 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 - Стенд HIL недоступен на implementation-карте → обязательный набор деградирует на bench (watchdog/lease с программным starvation) с документированием;
 - Переход к сертификации → миграция evidence-схемы на ISO 26262-6 work products;
 - Появление зрелого cycle-accurate ISS с поддержкой ststm32/Arduino core → пересмотр решения по ISS;
-- Новый профиль шаттла → пересчёт D_brake, геометрии, stall-порогов (#48 §12).
+- Новый профиль шаттла → отдельный minor-release, пересчёт D_brake, геометрии, stall-порогов (#48 §12) и Profile Qualification Campaign (§7.4);
+- Изменение общего кода, safety policy, tuning или аппаратных assumptions → повторный impact analysis qualification всех заявленных профилей; неподтвержденный профиль исключается из `qualifiedProfileIds` этого release;
 
 ## 13. Отклонённые альтернативы
 

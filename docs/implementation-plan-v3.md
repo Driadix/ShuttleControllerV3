@@ -1,6 +1,6 @@
 # Implementation Plan V3 (item 13, gate G6)
 
-Статус: **In Review (тикет [#57](https://github.com/Driadix/ShuttleControllerV3/issues/57), gate G6)**; статус Approved фиксируется при закрытии тикета (issue 8 §7: Draft → In Review → Approved). Вход в logical item `Implementation Plan` нормативного пакета (issue 8, item 13, gate G6). Класс: Normative (issue 8 §2). Этот документ фиксирует трассируемую декомпозицию реализации, зависимости, acceptance gates и rollout order. Реализационный дизайн железо-завязанных модулей (движение, CAN, I2C, алгоритмы) - территория implementation-карты с evidence с реального шаттла (правило карты, Notes).
+Статус: **In Review - profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision Approved при закрытии [#57](https://github.com/Driadix/ShuttleControllerV3/issues/57), gate G6**. Переутверждение фиксируется при закрытии #59 (issue 8 §7: Draft → In Review → Approved). Вход в logical item `Implementation Plan` нормативного пакета (issue 8, item 13, gate G6). Класс: Normative (issue 8 §2). Этот документ фиксирует трассируемую декомпозицию реализации, зависимости, acceptance gates и rollout order. Реализационный дизайн железо-завязанных модулей (движение, CAN, I2C, алгоритмы) - территория implementation-карты с evidence с реального шаттла (правило карты, Notes).
 
 Термины - канонические из `CONTEXT.md`.
 
@@ -36,9 +36,11 @@
 - Acceptance: контрактные wire-тесты (O2), подписочная машина (L2), radio-трафик сценарии (L2 + L5 as-needed), session lease → stop (L4/L5).
 - Критерий перехода: bridge- и radio-каналы работают end-to-end на стенде; admission-матрица (#13) host-проверена.
 
+**Gate выбора qualification target.** До перехода 2 → 3 реализация остается profile-neutral и сохраняет единый binary с bundles 800/1000/1200. На gate владелец фиксирует один физически доступный профиль как qualification target `v1.0.0`, подтверждает доступность шаттла и применимого sensor/drive setup. После gate смена target является Semantic rebaseline: профильные capability/evidence dependencies пересчитываются, затронутое evidence инвалидируется.
+
 ### Фаза 3: Capability-слайсы (13 операций)
 
-Каждый слайс: контракт операции (#13/#9) + алгоритмический док (#30-42) + host unit/property (O1/O2, evidence CI-artifact) + L3 с adapter fakes (CI-artifact) + L4 (measurement report) + **поле на реальном шаттле с замером таймингов** (правило карты; measurement report с workload metadata). Порядок внутри фазы - по зависимости от foundation и от сенсорики:
+Каждый слайс выполняется для qualification target: контракт операции (#13/#9) + алгоритмический док (#30-42) + host unit/property (O1/O2, evidence CI-artifact) + L3 с adapter fakes (CI-artifact) + L4 (measurement report) + **поле на реальном шаттле выбранного профиля с замером таймингов** (правило карты; measurement report с workload metadata). Профильные ветви других supported profiles сохраняются в универсальном binary, но не получают production claim `v1.0.0`. Порядок внутри фазы - по зависимости от foundation и от сенсорики:
 
 | # | Операция | Док | Ключевые зависимости |
 | --- | --- | --- | --- |
@@ -58,9 +60,9 @@
 
 ### Фаза 4: Production lifecycle и release
 
-- Модули: bootloader/update (#50: verified boot, A/B-слоты, W_apply ≤ 1 s измерение, rollback), config/provisioning полнота (#50), журналы/retention (#49), release gates (#52 §7.3).
-- Acceptance: L5 обязательное acceptance **№5** (#52 §6.3: power-cut update E2E + W_apply измерение; все 6 обязательных - release gate), commissioning-процедуры (Q7.1 A: fail-safe приводов, INV-BRAKE-VALIDITY), release evidence (7 пунктов #52 §7.3).
-- Критерий: первый production-релиз v1.0.0 по #51 §9.2 (attestation, SHA-манифест).
+- Модули: bootloader/update (#50: verified boot, A/B-слоты, W_apply ≤ 1 s измерение, rollback), config/provisioning полнота и image/profile qualification gate (#50), журналы/retention (#49), release gates (#52 §7.3-7.4).
+- Acceptance: L5 обязательное acceptance **№5** (#52 §6.3: power-cut update E2E + W_apply измерение; все 6 обязательных - release gate), qualification negative/rollback/recovery scenarios (#52 §7.4), commissioning-процедуры выбранного профиля (Q7.1 A: fail-safe приводов, INV-BRAKE-VALIDITY), release evidence (7 пунктов #52 §7.3).
+- Критерий: первый production-релиз v1.0.0 по #51 §9.2 (attestation, SHA-манифест), где оба signed app images аутентифицируют singleton `qualifiedProfileIds`, а evidence однозначно называет target profile.
 
 ## 3. Модульная карта (модуль → компонент #43 → acceptance; evidence type по #52 §4)
 
@@ -88,7 +90,7 @@
 - **#43 §8 (#1-#15)**: #1/#2/#3 → Safety Authority + Sensing + Actuator + CAN HAL (C1-цепочка); #4 → адаптеры; #5 → Watchdog + flash; #6 → Manual Session; #7 → Queues/Observability; #8 → Execution core; #9 → Monotonic; #10 → build+target; #11 → Update/Persistence (L5); #12 → Observability Sink + UART; #13 → CAN HAL; #14 → I2C HAL + Sensing; #15 → Transport radio.
 - **#48 §11 measurement obligations**: полевые (#1 D_brake/v_max, ATEMP, availability) - фаза 3/4 на реальном шаттле; bench (#2-#8/#10/#12-#14) - фазы 1-3 на L4; HIL (#11/#13/#15) - фаза 4 (L5).
 - **#49 §13 (observability obligations)**: fault-capture ≤ 512 Б, integrity-скан/journalFull, лимиты журнала/wrap/SetWallClock plausibility, backup-domain loss → Observability Producer + Persistence; подписки/gap re-sync, snapshot ≤ 2 фрагмента, radio events-резерв → Observability Producer + Transport bridge/radio; crash-запись через reboot, reset-cause счётчики → Observability Producer + Execution core (стартап).
-- **#50 §12 (lifecycle contract tests)**: load_address mismatch, Finalize/commit counter семантика, DowngradeDenied, rollback_flag, status sector-full, JournalFull, power-cut mid-provisioning/mid-GC, verified boot/bootcount/pointer/pending → Bootloader/Update + Config & Profile + Persistence.
+- **#50 §12 (lifecycle contract tests)**: load_address mismatch, Finalize/commit counter семантика, DowngradeDenied, rollback_flag, status sector-full, JournalFull, power-cut mid-provisioning/mid-GC, verified boot/bootcount/pointer/pending, `ProfileNotQualified`, image/configured-profile admission, mismatch Recovery → Bootloader/Update + Config & Profile + Persistence.
 - **#52**: startup-to-Ready ≤ 5 s (INV-STARTUP-GATE) → Execution core + Safety Authority (стартап, L4); обязательные L5 (§6.3) → фазы 1/2/4.
 - **#52 verification attributes**: каждый модуль §3 таблицы имеет method/oracle/environment/evidence type; обязательные L5 - фазы 1, 2, 4.
 
@@ -98,9 +100,9 @@
 | --- | --- |
 | 0 → 1 | bring-up report принят; мониторинг/пинг/CAN работают |
 | 1 → 2 | C1-цепочка и T_fs измерены (L4/L5 или явный перевод на поле); bounded steps подтверждены |
-| 2 → 3 | каналы end-to-end на стенде; admission host-проверена |
+| 2 → 3 | каналы end-to-end на стенде; admission host-проверена; физически доступный профиль и sensor/drive setup зафиксированы как qualification target `v1.0.0` |
 | 3 → 4 | 13 операций приняты на поле с таймингами; safety-инварианты не ослаблены |
-| 4 → release | L5 обязательные 6 acceptance (#52 §6.3) + release evidence 7 пунктов |
+| 4 → release | L5 обязательные 6 acceptance (#52 §6.3) + Profile Qualification Campaign выбранного профиля (#52 §7.4) + release evidence 7 пунктов |
 
 Откат фазы (rule #8 §9 change classes): любой Semantic-дефект в модуле фазы N возвращает фазу N по impact-анализу, не откатывая foundation.
 
@@ -110,18 +112,18 @@
 - **Стенд L5**: обязательные acceptance требуют стенда #52 §6; при недоступности - деградация на bench с документированием (#52 §12).
 - **Приводы/лифтер**: контракты CAN 100/101/2405 и fail-safe (Q7.1 A) проверяются commissioning-тестами на поле.
 - **W_apply ≤ 1 s**: измерение на L5 (фаза 4); RAM-exec развилка - по измерению flash-стопа.
-- **Профили 800/1000/1200**: геометрия и calibration-пороги (U07/U01) уточняются при commissioning.
+- **Профили 800/1000/1200**: единый binary реализует все три supported bundles; `v1.0.0` квалифицирует один target, выбранный на gate 2 → 3. Геометрия и calibration-пороги target (U07/U01) уточняются при commissioning. Остальные профили требуют отдельных future minor-release campaigns; qualification переносится между релизами только по impact analysis.
 - **F4 (открытый, карта #1 fog)**: реализуемость и реальная необходимость min-ID force-stop кадра (поддержка приводами) не подтверждена железом; при неподдержке C4 переякоривается на verified drive-timeout (Q7.1 A расширяется). Фаза 1 acceptance gate (обязательное №2: force-stop кадр ≤ T_fs) зависит от F4 - закрытие F4 или явный перевод в implementation-карту до входа в фазу 1.
 
 ## 7. G6 closure checklist (issue 8 §6)
 
-- [x] Нет TBD и открытых блокирующих решений в scope (все решения тикетов карты приняты; F4 - открытый риск §6, закрывается до входа в фазу 1 или переводится явно).
+- [x] Pre-rebaseline revision: нет TBD и открытых блокирующих решений в исходном scope (все решения карты #1 приняты; F4 - открытый риск §6, закрывается до входа в фазу 1 или переводится явно).
 - [x] Каждый модуль имеет источник, зависимости и acceptance (таблицы §3-4).
 - [x] Обязательные сценарии (safety-путь C1, fault-пути, overload, update) покрыты acceptance.
 - [x] Трассировка obligations/бюджетов/verification → модули полна (§4, включая #49 §13 и #50 §12).
 - [x] Derived views (trace/status/coverage) - тикет #56 (Baseline Manifest).
-- [x] Independent review: проведено при закрытии тикета #57 (2 MAJOR + 4 MINOR + 2 NIT учтены).
-- [ ] Owner approval: gate G6 (фиксируется при закрытии тикета #57).
+- [x] Pre-rebaseline revision: independent review проведен при закрытии тикета #57 (2 MAJOR + 4 MINOR + 2 NIT учтены).
+- [ ] Profile qualification rebaseline: independent review final revision и owner approval фиксируются при закрытии [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59).
 
 ## 8. Ссылки
 

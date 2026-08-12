@@ -1,6 +1,6 @@
 # Инженерный baseline и выпуск V3 (Engineering & Release, item 11)
 
-Статус: **утверждено владельцем (гриллинг, тикет [#51](https://github.com/Driadix/ShuttleControllerV3/issues/51))**. Вход в logical item `Engineering & Release` нормативного пакета (issue 8, gate G5) и в architecture proving slice (тикет #54). Каждый численный или версионный факт имеет источник; воспроизводимость проверяема командами раздела «Проверяемость».
+Статус: **In Review - profile qualification evidence carrier rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем в тикете [«Спроектировать engineering и release baseline V3»](https://github.com/Driadix/ShuttleControllerV3/issues/51)**. Вход в logical item `Engineering & Release` нормативного пакета (issue 8, gate G5) и в architecture proving slice (тикет #54). Каждый численный или версионный факт имеет источник; воспроизводимость проверяема командами раздела «Проверяемость».
 
 Production-каркас (CI workflow, скрипты enforcement, `.clang-tidy`, PR-шаблоны) материализуется после достижения Destination карты (правило карты: PlatformIO-каркас вне планирующей карты), в implementation-карте. Исключение - минимальный исполняемый каркас proving slice #54: #54 - тикет текущей карты и pre-Destination evidence (issue 10: harness готовится до реализации capability functions, включает frozen toolchain/board bring-up); `platformio.ini` с пинами раздела 3, env kernel variants и native test env создаются в рамках #54 и эмпирически верифицируют пины раздела 3 до G4/G5. Настоящий документ задаёт обязательное содержимое обоих уровней; ссылки на `tools/*` и jobs в разделах 7-13 являются спецификацией production-каркаса.
 
@@ -160,12 +160,13 @@ platform_packages =
 
 ### 9.2 Release-workflow (тег `v*`): `release.yml`
 
-1. Сборка `env:firmware` (те же пины).
+1. Сборка двух раздельно слинкованных slot variants `app_A` и `app_B` по #50 §3.1 (разные link base, отдельные подписанные binaries) из одного source/build revision; toolchain/build reports общие, slot artifacts различаются ожидаемым layout.
 2. Формирование версии из тега и SHA (раздел 10).
-3. `sha256sum` манифест.
-4. Draft release (`gh release create --draft`), attach `firmware.elf`, `firmware.hex`, `firmware.bin`, `SHA256SUMS.txt`.
-5. Attestation: `actions/attest@<sha> # v4` с `subject-path` на бинарники (раздел 11).
-6. Publish draft (immutable releases best practice: draft -> assets -> publish).
+3. Формирование `PROFILE-QUALIFICATION.json`: `{firmwareVersion, firmwareGitSha, qualifiedProfileIds, slotArtifacts[{slot, filename, sha256}], evidenceRefs[]}` из metadata обоих подписанных app images; множества app_A/app_B обязаны совпадать. Файл только зеркалирует подписанные image metadata и не является trust root.
+4. `SHA256SUMS.txt` в формате shasum для build artifacts и `PROFILE-QUALIFICATION.json`.
+5. Draft release (`gh release create --draft`), attach build artifacts, `PROFILE-QUALIFICATION.json`, `SHA256SUMS.txt`.
+6. Attestation: `actions/attest@<sha> # v4` с `subject-path` на бинарники (раздел 11).
+7. Publish draft (immutable releases best practice: draft -> assets -> publish).
 
 Permissions release-workflow: `contents: write`, `id-token: write`, `attestations: write`; триггер - только на тег `v*` (tag protection включён).
 
@@ -178,10 +179,10 @@ Permissions release-workflow: `contents: write`, `id-token: write`, `attestation
 ## 11. Artifact provenance
 
 - **Механизм**: GitHub Artifact Attestations (GA): `actions/attest@v4` (обёртка `attest-build-provenance` deprecated для новых проектов), SLSA v1.0 Build Level 2, Sigstore (публичный репозиторий - Public Good Instance).
-- **Субъекты**: `firmware.elf`, `firmware.hex`, `firmware.bin` (subject-path); манифест `SHA256SUMS.txt` в формате shasum.
+- **Субъекты attestation**: build artifacts, включая signed `app_A`/`app_B` binaries (subject-path). **Evidence carrier**: `PROFILE-QUALIFICATION.json` зеркалирует квалификацию и SHA256 обоих signed slot images; `SHA256SUMS.txt` содержит shasum build artifacts и этого JSON. Ни JSON, ни SHA-манифест не заменяют ECDSA image signature как trust root.
 - **Верификация потребителем** (документируется для OTA-флоу #50):
-  - `gh attestation verify firmware.bin -R Driadix/ShuttleControllerV3`
-  - `gh release verify vX.Y.Z` / `gh release verify-asset vX.Y.Z firmware.bin`
+  - `gh attestation verify <slot-artifact> -R Driadix/ShuttleControllerV3` для `app_A` и `app_B`;
+  - `gh release verify vX.Y.Z` / `gh release verify-asset vX.Y.Z <slot-artifact>`.
 - Immutable releases включены (автоматическая release attestation).
 - Ограничение: attestations доступны на публичных репозиториях (наш - публичный); private/Enterprise-перенос потребует Enterprise Cloud.
 
