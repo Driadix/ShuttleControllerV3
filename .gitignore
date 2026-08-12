@@ -1,5 +1,7 @@
 # PlatformIO
 .pio/
+.venv-pio/
+firmware.map
 
 # Editors
 .vscode/
