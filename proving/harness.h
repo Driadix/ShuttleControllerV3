@@ -8,6 +8,7 @@
 
 #include "domain/arbitration.h"
 #include "domain/ports.h"
+#include "domain/queues.h"
 #include "domain/safety_health.h"
 #include "proving/measurement.h"
 #include "proving/workload.h"
@@ -25,6 +26,7 @@ struct HarnessState
     SafetyHealth health;
     Arbitration arb;
     CanPort* can = nullptr;
+    QueueClasses* queues = nullptr; // observability egress queues (log storm L4)
     Measurement* measurement = nullptr;
 
     // Freshness model (ToF class, issue #48 section 5): the sensing step
@@ -36,6 +38,11 @@ struct HarnessState
     // requires fresh directional sensing; staleness under motion => stop.
     bool motion_commanded = false;
 
+    // F1 bumper injection (cooperative variant): latched into the funnel by the
+    // sensing step at the next boundary (Q7.2 deferral semantics on target).
+    // Hybrid variant uses kernel::force_stop_isr() instead (preemptible).
+    bool bumper_pending = false;
+
     // F3 lease model: manual hold-to-run; expiry => CONTROLLED stop.
     std::uint64_t lease_expires_at_ms = 0;
     bool manual_held = false;
@@ -44,9 +51,9 @@ struct HarnessState
     // sample so its age grows past T_fresh (staleness under motion).
     bool force_stale = false;
 
-    // Trace bookkeeping for obligation #1.
-    std::uint64_t stop_intent_at_ms = 0; // when Safety issued the stop intent
-    std::uint64_t last_stop_emitted_at_ms = 0;
+    // Trace bookkeeping for obligation #1 (T_eso, measured in us).
+    std::uint64_t stop_intent_at_us = 0; // when Safety issued the stop intent
+    std::uint64_t last_stop_emitted_at_us = 0;
     bool stop_pending_trace = false;
 };
 

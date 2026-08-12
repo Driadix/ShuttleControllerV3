@@ -57,6 +57,8 @@ class SafetyHealth
                 break;
             case Health::Fault:
                 break; // latched; recovery requires explicit reset (slice: clear_fault())
+            default:
+                break; // defensive (R4): unknown enum value never changes state
         }
     }
 

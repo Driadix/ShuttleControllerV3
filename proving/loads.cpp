@@ -5,7 +5,6 @@
 #include "domain/ports.h"
 #include "domain/queues.h"
 #include "platform/execution_core.h"
-#include "proving/fakes.h"
 
 namespace slice
 {
@@ -53,18 +52,18 @@ void log_storm(QueueClasses& queues, std::uint32_t count)
     }
 }
 
-void can_flood(CanPort& can, std::uint32_t count)
+void rx_flood(CanPort& can, std::uint32_t count)
 {
     CanPort::Frame f = {};
-    f.id = 0x100;
+    f.id = 0x2405; // lifter current RX consumer (issue #43 section 4)
     f.len = 8;
     for (std::uint32_t i = 0; i < count; ++i)
     {
-        can.tx(f); // TX-side flood; RX flood is injected via inject_rx
+        can.inject_rx(f); // RX-side flood, > 64 frames/tick budget
     }
 }
 
-void tx_backpressure(CanPort& can, std::uint32_t count)
+void tx_flood(CanPort& can, std::uint32_t count)
 {
     CanPort::Frame f = {};
     f.id = 0x100;

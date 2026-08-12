@@ -26,12 +26,22 @@ namespace
 
 coop::StepRing g_ring;
 
-// Force-stop channel. ISR side writes; step side reads. Single writer per
-// context (issue #43: ISR writes only its own bounded slot).
+// Force-stop channel (issue 10: isolated preemptible critical path).
+// Single writer per context (issue #43: ISR writes only its own slot):
+// - force_stop_isr() runs in bumper ISR context (target, priority 0) or is
+//   called synchronously by the fault injector (host). It emits the min-ID
+//   frame DIRECTLY through the registered handler - true preemption of any
+//   running step (T_fs = T_isr + T_mailbox, C4; obligation #3/#13). The
+//   handler must be ISR-safe: bxCAN mailbox write is register-level.
+// - Repeated edges while pending collapse into one emission (Q7.2).
 volatile bool g_force_stop_pending = false;
 std::uint64_t g_force_stop_latched_us = 0;
 std::uint64_t g_force_stop_served_us = 0;
 std::uint32_t g_force_stop_count = 0;
+
+// CAN emitter registered by the harness (invoked from ISR context).
+StepFn g_force_stop_handler = nullptr;
+void* g_force_stop_handler_ctx = nullptr;
 
 std::uint64_t g_max_gap_ms = 0;
 std::uint64_t g_idle_ticks = 0;
@@ -41,14 +51,29 @@ bool g_initialized = false;
 } // namespace
 
 // Called from the bumper ISR (target, priority 0) or the fault injector (host).
+// Preempts any running step: the min-ID force-stop frame is emitted here,
+// synchronously, before the ISR returns (Q7.2: repeated edges collapse).
 void force_stop_isr()
 {
     if (!g_force_stop_pending)
     {
+        g_force_stop_pending = true;
         g_force_stop_latched_us = monotonic::ticks_us();
         ++g_force_stop_count;
+        if (g_force_stop_handler != nullptr)
+        {
+            g_force_stop_handler(g_force_stop_handler_ctx); // ISR-safe emission
+        }
+        g_force_stop_served_us = monotonic::ticks_us();
+        g_force_stop_pending = false; // collapsed; next edge emits again
     }
-    g_force_stop_pending = true; // repeated edges collapse into one (Q7.2)
+    // While pending (already emitting), repeated edges collapse (Q7.2).
+}
+
+void register_force_stop_handler(StepFn fn, void* ctx)
+{
+    g_force_stop_handler = fn;
+    g_force_stop_handler_ctx = ctx;
 }
 
 void init()
@@ -70,22 +95,17 @@ void on_tick()
         return;
     }
     const std::uint64_t now = monotonic::now_ms();
-    const std::uint64_t gap = now - g_last_tick_ms;
+    // Clamp backward time jumps (issue #48 section 9): zero gap, never a
+    // fabricated ~2^64 maximum.
+    const std::uint64_t gap = now >= g_last_tick_ms ? now - g_last_tick_ms : 0;
     if (gap > g_max_gap_ms)
     {
         g_max_gap_ms = gap;
     }
     g_last_tick_ms = now;
 
-    // Preemptible critical path first: force-stop is served before any step.
-    if (g_force_stop_pending)
-    {
-        g_force_stop_pending = false;
-        g_force_stop_served_us = monotonic::ticks_us();
-        // The CAN adapter's force_stop_tx() is invoked by the harness at this
-        // point (target: from ISR context via direct mailbox write).
-    }
-
+    // The preemptible critical path is served synchronously inside
+    // force_stop_isr() (ISR context); nothing to serve at the tick boundary.
     if (g_ring.empty())
     {
         ++g_idle_ticks;

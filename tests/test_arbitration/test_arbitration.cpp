@@ -63,6 +63,26 @@ TEST(Arbitration, ActivityCannotReplaceSafetyStop)
     EXPECT_EQ(out.kind, IntentKind::Stop); // safety intent stays current
 }
 
+TEST(Arbitration, SafetyMotionCannotReplaceSafetyStop)
+{
+    Arbitration arb;
+    Intent stop{};
+    stop.kind = IntentKind::Stop;
+    stop.source = IntentSource::Safety;
+    stop.stop_profile = StopProfile::Controlled;
+    arb.apply(stop);
+
+    // Authorized bounded safety motion (evacuation / low-battery return,
+    // safety model #45 section 4) must NOT replace an active safety stop:
+    // documented order is SAFETY_STOP > SAFETY_MOTION > ACTIVITY_INTENT.
+    Intent motion{};
+    motion.kind = IntentKind::VelocitySetpoint;
+    motion.source = IntentSource::Safety;
+
+    const Intent out = arb.apply(motion);
+    EXPECT_EQ(out.kind, IntentKind::Stop);
+}
+
 TEST(Arbitration, ForceStopNeverRejectedAndWinsOverStop)
 {
     Arbitration arb;

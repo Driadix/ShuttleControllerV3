@@ -46,11 +46,11 @@ inline bool intent_preempts(const Intent& candidate, const Intent& current)
     const auto rank = [](const Intent& i) {
         if (i.source == IntentSource::Safety && i.kind == IntentKind::ForceStop)
         {
-            return 3; // SAFETY_STOP (force-stop level)
+            return 4; // SAFETY_STOP (force-stop level, highest)
         }
         if (i.source == IntentSource::Safety && i.kind == IntentKind::Stop)
         {
-            return 2; // SAFETY_STOP (safety stop)
+            return 3; // SAFETY_STOP (safety stop)
         }
         if (i.source == IntentSource::Safety)
         {
@@ -58,7 +58,9 @@ inline bool intent_preempts(const Intent& candidate, const Intent& current)
         }
         return 1; // ACTIVITY_INTENT
     };
-    return rank(candidate) >= rank(current);
+    // A safety stop is never replaced by a safety motion or an activity intent.
+    return rank(candidate) > rank(current) ||
+           (rank(candidate) == rank(current) && candidate.kind == current.kind);
 }
 
 } // namespace slice

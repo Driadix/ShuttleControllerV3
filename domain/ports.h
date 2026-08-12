@@ -42,6 +42,11 @@ struct CanPort
     // Bounded RX drain: pops at most `budget` frames; returns number drained.
     virtual std::uint32_t rx_drain(Frame* out, std::uint32_t budget) = 0;
 
+    // Fault-injection hook (harness L1): pushes a frame into the RX path as if
+    // received from the bus. Target adapter implements it as a test hook
+    // behind a compile-time flag; host fakes implement it directly.
+    virtual void inject_rx(const Frame& frame) = 0;
+
     // Force-stop: dedicated mailbox, lowest extended ID on the bus.
     virtual void force_stop_tx() = 0;
 };

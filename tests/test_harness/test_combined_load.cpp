@@ -34,23 +34,19 @@ TEST(CombinedLoad, BoundedStepsHoldUnderFloodAndStorm)
         loads::schedule_operation_steps(kernel::MaxSteps);
         // L4: log storm at max emission.
         loads::log_storm(queues, 40);
-        // L1: CAN flood on both TX and RX paths.
-        CanPort::Frame f = {};
-        f.id = 0x2405;
-        f.len = 8;
-        can.inject_rx(f);
-        can.inject_rx(f);
-        can.inject_rx(f);
-        loads::tx_backpressure(can, 4);
+        // L1: CAN flood on RX (> 64 frames/tick budget) and TX (> 16/tick).
+        loads::rx_flood(can, 80);
+        loads::tx_flood(can, 20);
 
         kernel::on_tick();
     }
 
     // Every step stayed within the 10 ms budget (host: microseconds).
     EXPECT_LE(kernel::max_step_duration_ms(), kernel::StepBudgetMs);
-    // Overload is observable, not silent (obligation #7).
+    // Overload is observable, not silent (obligation #7/#13).
     EXPECT_GT(queues.dropped_logs(), 0);
     EXPECT_GT(can.tx_dropped(), 0);
+    EXPECT_GT(can.rx_overflow(), 0); // > 64 frames/tick => RX overflow counted
 }
 
 } // namespace

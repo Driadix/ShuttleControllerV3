@@ -38,12 +38,12 @@ class Metric
     std::uint64_t m_sum_us = 0;
 };
 
-// Event->safe-output trace: trigger timestamp -> safe-output timestamp.
+// Event->safe-output trace: trigger timestamp -> safe-output timestamp (us).
 struct Trace
 {
     const char* scenario_id = nullptr;
-    std::uint64_t trigger_ms = 0;
-    std::uint64_t output_ms = 0;
+    std::uint64_t trigger_us = 0;
+    std::uint64_t output_us = 0;
     std::uint64_t delta_us = 0;
 };
 
@@ -55,12 +55,14 @@ class Measurement
     // Named metrics (obligation IDs #43 section 8).
     Metric& metric(std::uint32_t obligation_id) { return m_metrics[obligation_id % kMetricCount]; }
 
-    void record_trace(std::uint64_t trigger_ms, std::uint64_t output_ms)
+    // Event->safe-output trace with microsecond resolution (obligation #1:
+    // T_eso = trigger -> CAN emission; issue #48 section 2).
+    void record_trace_us(std::uint64_t trigger_us, std::uint64_t output_us)
     {
         if (m_trace_count < kMaxTraces)
         {
-            m_traces[m_trace_count] = Trace{m_wl.scenario_id, trigger_ms, output_ms,
-                                            (output_ms - trigger_ms) * 1000};
+            m_traces[m_trace_count] = Trace{m_wl.scenario_id, trigger_us, output_us,
+                                            output_us - trigger_us};
             ++m_trace_count;
         }
     }

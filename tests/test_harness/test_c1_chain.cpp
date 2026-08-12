@@ -83,9 +83,10 @@ TEST_F(C1ChainTest, StaleSensingProducesStopFrameWithinBudgetChain)
     EXPECT_EQ(state.arb.current().source, slice::IntentSource::Safety);
     EXPECT_GT(can.tx_count(), tx_before); // stop frame emitted (safe output)
     // Chain budget: T_fresh + T_eso <= 370 ms analytical (issue #48 section 2);
-    // on host the detection happens within one tick, far inside the budget.
-    const std::uint64_t output_ms = state.last_stop_emitted_at_ms;
-    EXPECT_LE(output_ms - detect_tick, 370);
+    // detection to emission is inside one tick, far inside the budget.
+    const std::uint64_t eso_us =
+        state.last_stop_emitted_at_us - state.stop_intent_at_us;
+    EXPECT_LE(eso_us, 370'000);
 }
 
 TEST_F(C1ChainTest, HealthEntersDegradedOnStaleness)

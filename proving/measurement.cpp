@@ -48,9 +48,9 @@ void Measurement::finalize()
             }
         }
         const Trace& t = m_traces[worst];
-        std::printf("  worst trace: %s trigger_ms=%llu output_ms=%llu delta_us=%llu (n=%u)\n",
-                    t.scenario_id, static_cast<unsigned long long>(t.trigger_ms),
-                    static_cast<unsigned long long>(t.output_ms),
+        std::printf("  worst trace: %s trigger_us=%llu output_us=%llu delta_us=%llu (n=%u)\n",
+                    t.scenario_id, static_cast<unsigned long long>(t.trigger_us),
+                    static_cast<unsigned long long>(t.output_us),
                     static_cast<unsigned long long>(t.delta_us), m_trace_count);
     }
     std::printf("=== end record ===\n");

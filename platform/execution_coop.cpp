@@ -45,7 +45,9 @@ void on_tick()
         return;
     }
     const std::uint64_t now = monotonic::now_ms();
-    const std::uint64_t gap = now - g_last_tick_ms;
+    // Clamp backward time jumps (NTP-style corrections, issue #48 section 9):
+    // a backward jump is zero gap, never a fabricated ~2^64 maximum.
+    const std::uint64_t gap = now >= g_last_tick_ms ? now - g_last_tick_ms : 0;
     if (gap > g_max_gap_ms)
     {
         g_max_gap_ms = gap;
@@ -66,6 +68,10 @@ bool schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms)
 {
     return g_ring.schedule(fn, ctx, deadline_ms, monotonic::now_ms());
 }
+
+// Cooperative variant: the funnel carries the ForceStop intent; no preemptible
+// channel (issue #43 INV-FORCE-STOP-CHANNEL served at the next step boundary).
+void register_force_stop_handler(StepFn, void*) {}
 
 std::uint64_t now_ms() { return monotonic::now_ms(); }
 

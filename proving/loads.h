@@ -25,13 +25,14 @@ std::uint32_t schedule_operation_steps(std::uint32_t count);
 // policy applies, overflow counted (obligation #12: no step exceeds T_step).
 void log_storm(QueueClasses& queues, std::uint32_t count);
 
-// L1: CAN flood - injects `count` frames into the CAN RX path (obligation #13:
-// RX overflow + control plane stays alive under > 64 frames/tick).
-void can_flood(CanPort& can, std::uint32_t count);
+// L1: CAN RX flood - injects `count` frames per tick into the RX path
+// (obligation #13: RX overflow + control plane stays alive under
+// > 64 frames/tick, the per-tick drain budget).
+void rx_flood(CanPort& can, std::uint32_t count);
 
 // L2: fills the CAN TX log past its per-tick budget (obligation #12/#13:
 // bounded TX, no blocking).
-void tx_backpressure(CanPort& can, std::uint32_t count);
+void tx_flood(CanPort& can, std::uint32_t count);
 
 // Busy-work step used as the bounded-step generator body (measures step
 // duration; stays far below T_step on host).

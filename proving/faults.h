@@ -16,17 +16,18 @@ namespace faults
 {
 
 // F1: bumper edge. Hybrid variant: enters the preemptible force-stop channel
-// (kernel::force_stop_isr). Cooperative variant: the same semantic is a latch
-// processed at the next tick boundary - the comparison records the difference.
-void bumper_edge();
+// (kernel::force_stop_isr, served at on_tick -> CAN emitter). Cooperative
+// variant: latches into the funnel via the sensing step (Q7.2 deferral).
+// Obligation #3/#13: T_fs = edge -> min-ID frame.
+void bumper_edge(HarnessState& state);
 
 // F2: sensor stale - stops sensing refreshes so the sample age exceeds
 // T_fresh. The Safety Authority must produce a stop intent (obligation #1/#2).
 void sensor_stale(HarnessState& state);
 
-// F3: manual link loss - lease expiry; must produce a bounded CONTROLLED stop
-// (obligation #6).
-void link_loss();
+// F3: manual link loss - expires the lease; the safety step must produce a
+// bounded CONTROLLED stop (obligation #6, INV-LEASE-STOP).
+void link_loss(HarnessState& state);
 
 // F4: external STOP command through the arbitration funnel.
 void stop_command(Arbitration& arb);

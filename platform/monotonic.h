@@ -1,10 +1,17 @@
 // Monotonic time source: 1 ms tick (issue #48 section 9: monotonic, wrap-safe,
 // NTP-jump immune - all domain timeouts count from monotonic).
 //
-// Target: TIM2 (32-bit) 1 ms tick ISR increments a 64-bit counter; high
-// resolution via DWT CYCCNT (Cortex-M4F, see measurement.md).
-// Host: virtual injected clock for deterministic tests (set/advance); ticks_us
-// falls back to a real steady clock for host benchmark runs (non-deterministic).
+// Target: TIM2 (32-bit) 1 ms tick ISR (via the core's HardwareTimer) advances a
+// 64-bit counter; the ISR also extends the 32-bit DWT CYCCNT into a 64-bit
+// cycle count, so ticks_us() never wraps (issue #45 §7.2 / obligation #3).
+// 64-bit reads on the 32-bit core are protected from ISR-torn values by
+// read-twice-and-compare (rule R2: ISR writes only its own slots; readers
+// tolerate torn snapshots).
+//
+// Host: virtual injected clock drives both now_ms and ticks_us - fully
+// deterministic (issue 10 evidence #5). Real timing evidence is target-only
+// (DWT leg); host step durations are 0 us by design (documented in
+// proving-slice-v3.md section 8).
 #pragma once
 
 #include <cstdint>

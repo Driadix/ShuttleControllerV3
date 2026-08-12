@@ -70,8 +70,8 @@
 ### 3.2 Hybrid (fallback-кандидат)
 
 - Определение issue 10: «изолированный critical execution path с cooperative/event-driven orchestration».
-- Slice-минимум: cooperative core (как 3.1) + **прерываемый critical path** для force-stop эмиссии (bumper → min-ID CAN кадр) с приоритетом выше cooperative шагов; остальная логика идентична 3.1.
-- Инвариант сравнения: вся остальная harness-конфигурация идентична cooperative (те же шаги, те же адаптеры, те же нагрузки).
+- Slice-минимум: cooperative core (как 3.1) + **прерываемый critical path**: bumper edge (ISR, приоритет 0) эмитит min-ID force-stop кадр **синхронно из ISR-контекста** через зарегистрированный ISR-safe emitter (bxCAN mailbox write, RM0090 §32.7) - преемпшн любого исполняемого шага (T_fs = T_isr + T_mailbox, C4); остальная логика идентична 3.1.
+- Host-нога: `force_stop_isr()` вызывается fault-инжектором синхронно в точке вызова (симуляция преемпшна; реальная преемпшн-латентность - target evidence). Q7.2-collapse повторных фронтов применяется к cooperative deferral-пути (окно erase), не к hybrid.
 
 ### 3.3 Static RTOS
 
@@ -130,7 +130,25 @@
 | #14 | I2C recovery при параллельной BMS | recovery ≤ 16 SCL, cooldown ≥ 5 s; Degraded своевременно | L5 + L9 | target |
 | #15 | radio AUX-hang, mode-settle | ожидание неблокирующее; ни один шаг > T_step | AUX hold: split по bounded под-шагам | target (или HIL radio as-needed, #52 §5.3) |
 
-Переводы obligations в следующий шаг (допускаются acceptance #54): #11 полностью (HIL), #13-частично (физический слой CAN - HIL), #15 (HIL radio as-needed). Каждый перевод - явная строка отчёта с методом закрытия в production-пирамиде (#52 §5.3).
+Переводы obligations в следующий шаг (допускаются acceptance #54):
+
+| Obl | Статус на скелете | Куда переведено |
+| --- | --- | --- |
+| #1/#2 | host: цепочка детерминированно проверена (C1-тесты, µs-трассы); target-измерение T_eso/T_check_jitter/T_arb | bench bring-up (реальные адаптеры) |
+| #3 | W_flash/T_isr/force-stop в окне erase | bench bring-up (flash-адаптер, RAM-exec развилка) |
+| #4 | adapter duration bounds | bench bring-up (реальные CAN/UART/I2C адаптеры) |
+| #5 | watchdog под combined load: host-модель + starvation-тест; target-измерение | bench bring-up |
+| #6 | lease → stop: host-тест (CONTROLLED stop в пределах шага); target-измерение T_lease_stop | bench bring-up |
+| #8 | bounded steps: host-тесты; target-измерение | bench bring-up |
+| #9 | host property-тесты (wrap, backward jump) - закрыто | - |
+| #10 | link map + per-function stack (`.su`) на target-сборке; CPU/RAM/stack high-water | bench bring-up (runtime watermarks) |
+| #11 | power-cut: save / update / mid-operation | HIL (#52 §6) |
+| #12 | log-storm: host-тест (ни один шаг > T_step); target-проверка неблокирующего TX | bench bring-up |
+| #13 | CAN dual-class TX/RX/flood: host-тесты (RX overflow, TX budget); физический слой | bench + HIL (CAN-инъектор) |
+| #14 | I2C recovery при BMS | bench bring-up (I2C-адаптер + bus-busy) |
+| #15 | radio AUX-hang | HIL radio as-needed (#52 §5.3) |
+
+Пока bench-адаптеры не реализованы, target-нога скелета - пустой kernel loop; obligation-измерения #1-#6/#8/#10/#12-#14 явно переведены в bench-шаг (M1-фикс: честный transfer-лист вместо молчаливого отсутствия пути).
 
 ## 7. Evidence-протокол
 
@@ -146,7 +164,7 @@
 
 | Слой | Среда | Что измеряется/проверяется |
 | --- | --- | --- |
-| Host (native, `pio test -e native`) | CI/local | deterministic core: bounded steps, arbitration порядок, queue overload, freshness FSM, lease FSM, NTP (обл. #9), свойственные каждому kernel инварианты; fault-тесты F2/F3/F4/F6 |
+| Host (native, `pio test -e native-*`) | CI/local | deterministic core: bounded steps, arbitration порядок, queue overload, freshness FSM, lease FSM (F3), monotonic wrap/backward-jump (#9), C1-цепочка с µs-трассами, свойственные каждому kernel инварианты; fault-тесты F2/F3/F4/F6. **Host-тайминги виртуальные (детерминированные), НЕ execution-evidence** - реальные тайминги только target (DWT); host-нога отвечает за логику и сравнение kernel-семантики (issue 10 evidence #5) |
 | Bench (плата без механики) | плата + ST-Link + CAN-пир | тайминги: T_eso, T_check_jitter, T_arb, T_emit, T_fs, W_flash, ISR-latency в окне, adapter bounds, watchdog под combined load, CPU/RAM/stack (обл. #1–#8, #10, #12–#14) |
 | HIL (стенд) | CAN-инъектор, питание-реле, I2C-коммутатор, E22+аттенюатор | power-cut (#11), физический CAN (#13), radio AUX-hang (#15) - по #52 §6, as-needed на release/смену класса |
 

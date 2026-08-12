@@ -39,6 +39,11 @@ void on_tick(); // 1 ms tick hook: target timer ISR / host tests
 // (observable overload, obligation #7).
 bool schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms);
 
+// Registers the force-stop CAN emitter. Hybrid variant: called from the
+// preemptible serve path at on_tick() (target: ISR context). Cooperative
+// variant: no-op (the funnel carries the ForceStop intent instead).
+void register_force_stop_handler(StepFn fn, void* ctx);
+
 // ---- time ------------------------------------------------------------------
 
 // Monotonic time in ms since init; wrap-safe 64-bit (issue #48 section 9).

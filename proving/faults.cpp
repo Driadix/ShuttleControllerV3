@@ -5,6 +5,7 @@
 #include "domain/arbitration.h"
 #include "domain/safety_health.h"
 #include "platform/execution_core.h"
+#include "proving/harness.h"
 
 #ifdef V3_KERNEL_HYBRID
 #include "platform/execution_hybrid.h"
@@ -17,14 +18,16 @@ namespace proving
 namespace faults
 {
 
-void bumper_edge()
+void bumper_edge(HarnessState& state)
 {
 #ifdef V3_KERNEL_HYBRID
-    kernel::force_stop_isr(); // preemptible channel (ISR priority on target)
+    // Preemptible channel: the hybrid kernel latches the request; the serve
+    // path (on_tick) invokes the registered CAN emitter (obligation #3/#13).
+    kernel::force_stop_isr();
 #else
-    // Cooperative: the bumper event is latched into the arbitration funnel by
-    // the sensing step at the next tick boundary (no preemption by design).
-    // The harness injects the intent through the normal step path.
+    // Cooperative: the bumper event is latched and applied to the funnel by
+    // the sensing step at the next tick boundary (Q7.2 deferral semantics).
+    state.bumper_pending = true;
 #endif
 }
 
@@ -35,7 +38,13 @@ void sensor_stale(HarnessState& state)
     state.force_stale = true;
 }
 
-void link_loss() {}
+void link_loss(HarnessState& state)
+{
+    // F3: manual link loss - expire the lease immediately; the safety step
+    // converts the expiry into a bounded CONTROLLED stop (obligation #6,
+    // INV-LEASE-STOP: T_lease_stop = T_step + T_ramp).
+    state.lease_expires_at_ms = kernel::now_ms();
+}
 
 void stop_command(Arbitration& arb)
 {

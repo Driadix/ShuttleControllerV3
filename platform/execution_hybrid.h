@@ -9,9 +9,12 @@ namespace slice
 namespace kernel
 {
 
-// Bumper ISR entry (target, priority 0): latches the force-stop request and
-// preempts any running step; the frame is emitted from ISR context.
-// Host: called by the fault injector; served at the next on_tick() boundary.
+// Bumper ISR entry (target, priority 0): emits the min-ID force-stop frame
+// DIRECTLY through the registered handler - preempts any running step
+// (T_fs = T_isr + T_mailbox, C4; obligation #3/#13). The handler must be
+// ISR-safe (bxCAN mailbox write is register-level). Host: called by the fault
+// injector; the emission is synchronous at the call site (simulated
+// preemption; real preemption timing is target evidence).
 void force_stop_isr();
 
 // Force-stop observables (obligation #3/#13).

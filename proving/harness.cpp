@@ -6,6 +6,7 @@
 #include "domain/ports.h"
 #include "domain/safety_health.h"
 #include "platform/execution_core.h"
+#include "platform/monotonic.h"
 #include "proving/measurement.h"
 
 namespace slice
@@ -29,6 +30,25 @@ void sensing_step(void* ctx)
 {
     auto* s = static_cast<HarnessState*>(ctx);
     const std::uint64_t now = kernel::now_ms();
+    const std::uint64_t t0 = monotonic::ticks_us();
+
+    // F1 (cooperative variant): latch the bumper into the funnel. The ForceStop
+    // intent is applied here so the actuator step emits the min-ID frame at the
+    // next boundary (Q7.2: first edge latches, repeated edges collapse).
+    if (s->bumper_pending)
+    {
+        Intent fs{};
+        fs.kind = IntentKind::ForceStop;
+        fs.source = IntentSource::Safety;
+        fs.seq = static_cast<std::uint32_t>(now);
+        s->arb.apply(fs);
+        s->bumper_pending = false;
+        if (s->measurement != nullptr)
+        {
+            s->stop_intent_at_us = monotonic::ticks_us(); // trigger
+            s->stop_pending_trace = true;
+        }
+    }
 
     // Freshness model: refresh the sample every round-robin cycle. The sample
     // age is the time since the last successful refresh. Fault F2 (force_stale)
@@ -38,12 +58,18 @@ void sensing_step(void* ctx)
         s->last_sample_at_ms = now;
     }
     s->sample_age_ms = now - s->last_sample_at_ms;
+
+    if (s->measurement != nullptr)
+    {
+        s->measurement->metric(2).record(monotonic::ticks_us() - t0); // T_check_jitter class
+    }
 }
 
 void safety_step(void* ctx)
 {
     auto* s = static_cast<HarnessState*>(ctx);
     const std::uint64_t now = kernel::now_ms();
+    const std::uint64_t t0 = monotonic::ticks_us();
 
     s->health.tick(now, s->sample_age_ms);
 
@@ -62,7 +88,7 @@ void safety_step(void* ctx)
         s->arb.apply(stop);
         if (s->measurement != nullptr)
         {
-            s->stop_intent_at_ms = now; // trigger timestamp (staleness detected)
+            s->stop_intent_at_us = monotonic::ticks_us(); // staleness detected
             s->stop_pending_trace = true;
         }
     }
@@ -77,10 +103,15 @@ void safety_step(void* ctx)
         s->arb.apply(stop);
         if (s->measurement != nullptr)
         {
-            s->stop_intent_at_ms = now;
+            s->stop_intent_at_us = monotonic::ticks_us();
             s->stop_pending_trace = true;
         }
         s->manual_held = false;
+    }
+
+    if (s->measurement != nullptr)
+    {
+        s->measurement->metric(2).record(monotonic::ticks_us() - t0); // T_arb class
     }
 }
 
@@ -92,13 +123,13 @@ void actuator_step(void* ctx)
         return;
     }
     const Intent& current = s->arb.current();
-    const std::uint64_t now = kernel::now_ms();
+    const std::uint64_t t0 = monotonic::ticks_us();
 
     CanPort::Frame f = {};
     if (current.kind == IntentKind::ForceStop)
     {
-        s->can->force_stop_tx();
-        f.id = 0x00000001; // min extended ID (obligation #13)
+        s->can->force_stop_tx(); // dedicated mailbox (obligation #13)
+        f.id = 0x00000001;       // min extended ID
     }
     else
     {
@@ -110,13 +141,26 @@ void actuator_step(void* ctx)
         }
     }
     s->can->tx(f);
-    s->last_stop_emitted_at_ms = now;
 
-    // Trace: trigger (staleness/lease detected) -> safe output (CAN emitted).
+    // Trace: trigger (staleness/lease/bumper detected) -> safe output (CAN
+    // emitted), measured in us. T_eso = T_check_jitter + T_arb + T_emit
+    // (obligation #1, budget 70 ms analytical; issue #48 section 2).
     if (s->stop_pending_trace && s->measurement != nullptr)
     {
-        s->measurement->record_trace(s->stop_intent_at_ms, now);
+        const std::uint64_t now_us = monotonic::ticks_us();
+        s->last_stop_emitted_at_us = now_us;
+        s->measurement->record_trace_us(s->stop_intent_at_us, now_us);
+        s->measurement->metric(1).record(now_us - s->stop_intent_at_us);
         s->stop_pending_trace = false;
+    }
+    else
+    {
+        s->last_stop_emitted_at_us = monotonic::ticks_us();
+    }
+
+    if (s->measurement != nullptr)
+    {
+        s->measurement->metric(2).record(monotonic::ticks_us() - t0); // T_emit class
     }
 }
 

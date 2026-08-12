@@ -100,7 +100,10 @@ void reload()
 
 void report_overrun(std::uint64_t step_ms)
 {
-    // An overrun delays the next reload; account it against the window.
+    // Host model: starvation is driven by tick gaps (the F5 test stops driving
+    // on_tick), so a step overrun does not itself advance the window. The
+    // overrun is observable via max_step_duration_ms() (obligation #8); on the
+    // target the IWDG backstop enforces the hardware window instead.
     (void)step_ms;
 }
 
