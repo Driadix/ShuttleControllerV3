@@ -1,6 +1,6 @@
 # Baseline Manifest V3 (gate G6)
 
-Статус: **Approved - profile qualification rebaseline items 2/6/7/8/11/12/13; финальная ревизия `7491869` (status finalization, PR #79), семантическое evidence `9b431a7` (PR #78); тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрывается после merge настоящего manifest PR**. Исторический gate G6 закрыт тикетом [#56](https://github.com/Driadix/ShuttleControllerV3/issues/56) для предыдущих revisions. Класс: Derived View (issue 8 §2: manifest и traceability/status/coverage матрицы; проверяются на полноту и консистентность, не получают повторного смыслового approval). Единая точка входа нормативного пакета V3.
+Статус: **Approved - profile qualification rebaseline items 2/6/7/8/11/12/13; финальная ревизия `7491869` (status finalization, PR #79), семантическое evidence `9b431a7` (PR #78); тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрыт**. Исторический gate G6 закрыт тикетом [#56](https://github.com/Driadix/ShuttleControllerV3/issues/56) для предыдущих revisions. Класс: Derived View (issue 8 §2: manifest и traceability/status/coverage матрицы; проверяются на полноту и консистентность, не получают повторного смыслового approval). Единая точка входа нормативного пакета V3.
 
 Правила: изменение любого включённого item revision - по change control (#8 §9, классы Editoral/Clarifying/Semantic/Baseline-affecting); manifest сам по себе не дублирует нормативное содержание (только ревизии, статусы, gates, approval records).
 
@@ -30,7 +30,7 @@ Profile qualification rebaseline [«Переутвердить профильн�
 
 | Класс | Покрытие | Статус |
 | --- | --- | --- |
-| Normative (13 items) | items 2, 6, 7, 8, 11, 12 и 13 утверждены profile qualification rebaseline | Approved (13/13): семантика `9b431a7` (PR #78), статус `7491869` (PR #79); независимый review + владелец; #59 закрывается после merge manifest PR |
+| Normative (13 items) | items 2, 6, 7, 8, 11, 12 и 13 утверждены profile qualification rebaseline | Approved (13/13): семантика `9b431a7` (PR #78), статус `7491869` (PR #79); независимый review + владелец; #59 закрыт |
 | Evidence | V1-индексы, capability slices, proving slice отчёт | verified (independent review) |
 | Governance | issue 8, triage/hitl/domain conventions, change classes | Approved |
 | Derived Views | настоящий manifest + матрицы §3-4 | Approved (manifest фиксирует финальные revision и approval records) |
@@ -78,7 +78,7 @@ Profile qualification rebaseline [«Переутвердить профильн�
 - [x] Derived views: trace (hazard → verification → модуль), status (item/class), coverage (obligations → модули).
 - [x] Orphan/uncovered: каждый obligation имеет модуль и статус; каждый модуль имеет acceptance (§3 implementation-plan).
 - [x] Schema-чеки: markdownlint-clean, относительные ссылки, без TBD.
-- [x] Блокирующие решения: profile qualification rebaseline принят владельцем и независимым review (PR #78), тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрывается.
+- [x] Блокирующие решения: profile qualification rebaseline принят владельцем и независимым review (PR #78), тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрыт.
 - [x] Independent review profile qualification rebaseline: APPROVE на `9b431a7` (0 BLOCKING, 0 MAJOR, 0 MINOR, 0 NIT); цепочка ревью #56/#57/4 раунда rebaseline зафиксирована в тикете #59.
 - [x] Owner approval profile qualification rebaseline: утверждён на `9b431a7` (тикет #59, PR #78).
 
