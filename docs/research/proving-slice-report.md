@@ -2,6 +2,8 @@
 
 Статус: **финальный отчёт тикета [#54](https://github.com/Driadix/ShuttleControllerV3/issues/54)**, host-only scope (решение владельца 2026-08-12). Ветка: `proving/slice-scaffold`, коммиты `03f0a2f`…`a6487d6`.
 
+Evidence-метаданные (паттерн #53): `source` = ветка `proving/slice-scaffold` (коммиты `03f0a2f`-`35cdc52`), `version` = ветка+HEAD на дату финализации, `confidence` = host-тесты детерминированные (высокая для логики/семантики), host-simulation (средняя, модельные числа, не measured), static evidence (высокая для линкер-фактов). Класс: Evidence (issue 8). Owner: владелец (approval через закрытие #54).
+
 **Ключевое ограничение (честность evidence)**: целевая плата и HIL-стенд недоступны в этой карте. Все результаты ниже - host-детерминированные тесты, host-simulation с физически обоснованными параметрами и статический анализ; **ни один результат НЕ является target-измерением** и не называется measured (правило #48 §1). Target-валидация бюджетов - implementation-карта (переводы в §4).
 
 ## 1. Что сравнивалось
@@ -86,7 +88,7 @@
 - Firmware-сборки (coop/hybrid/rtos) линкуются, но не верифицированы на железе (#51 §15 validation obligation остаётся открытой).
 - ControllerV6 PCB-референс зафиксирован (KiCad + BOM) как ресурс bring-up; V6 vs production-плата сверка - Unknown.
 
-## 8. Evidence records (V-<n>)
+## 8. Evidence records (V-N)
 
 | ID | Тип | Refs | Метод | Oracle | Среда | Результат |
 | --- | --- | --- | --- | --- | --- | --- |

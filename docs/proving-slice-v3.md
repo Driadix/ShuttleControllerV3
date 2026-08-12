@@ -2,7 +2,7 @@
 
 Статус: **draft для тикета [#54](https://github.com/Driadix/ShuttleControllerV3/issues/54)**. Ветка: `proving/slice-scaffold`.
 
-**Scope-решение владельца (2026-08-12): proving slice исполняется host-only** — целевая плата и HIL-стенд недоступны в рамках этой карты. Target-измерения невозможны; все obligations, требующие железа, явно переводятся в implementation-карту (допускается acceptance #54: «закрыты измерением или явно переведены в следующие шаги»). Slice даёт: host-сравнение cooperative vs hybrid (детерминированное), сборку и статический анализ static RTOS variant, host-simulation с физически обоснованными параметрами (datasheet-числа), static resource evidence и документированные переводы. Host-результаты НЕ называются measured (правило #48 §1); target-валидация бюджетов — implementation-карта.
+**Scope-решение владельца (2026-08-12): proving slice исполняется host-only**  -  целевая плата и HIL-стенд недоступны в рамках этой карты. Target-измерения невозможны; все obligations, требующие железа, явно переводятся в implementation-карту (допускается acceptance #54: «закрыты измерением или явно переведены в следующие шаги»). Slice даёт: host-сравнение cooperative vs hybrid (детерминированное), сборку и статический анализ static RTOS variant, host-simulation с физически обоснованными параметрами (datasheet-числа), static resource evidence и документированные переводы. Host-результаты НЕ называются measured (правило #48 §1); target-валидация бюджетов  -  implementation-карта.
 
 Входы: issue 10 (выбор execution architecture), [#43](https://github.com/Driadix/ShuttleControllerV3/issues/43) §8 (15 validation obligations), [#48](https://github.com/Driadix/ShuttleControllerV3/issues/48) §11 (measurement obligations) и §2–8 (бюджеты), [#45](https://github.com/Driadix/ShuttleControllerV3/issues/45) (safety-дедлайны C1–C6, stop-профили), [#51](https://github.com/Driadix/ShuttleControllerV3/issues/51) (frozen toolchain, §12), [#52](https://github.com/Driadix/ShuttleControllerV3/issues/52) (метод O4, протокол observed-maxima, L3/SIL-роль host-интеграции).
 
@@ -81,10 +81,10 @@
 ### 3.3 Static RTOS
 
 - **Реализован** (коммит `d6fdeca`): FreeRTOS через пинированный ST Cube middleware `mincrmatt12/STM32Cube Middleware-FreeRTOS@10.3.1+f4-1.26.1` (решение владельца 2026-08-12). `FreeRTOSConfig.h`: static-only (`configSUPPORT_DYNAMIC_ALLOCATION=0`, все задачи/очереди статические), preemptive 1 kHz, тик через weak-хук core `osSystickHandler()` → `xPortSysTickHandler()` (коллизий нет: порт не определяет SysTick_Handler).
-- 4 задачи slice (safety 5 / sensing 4 / actuator 2 / observability 1) + kernel control task (drain bounded work queue из `schedule()`); watchdog reload на границах шагов задач + idle hook (НЕ в tick hook — иначе F5 starvation маскируется).
-- Force-stop семантика: bumper ISR → `xTaskNotifyFromISR` → safety task (преемпшн по приоритету) → funnel ForceStop intent → actuator task эмитит min-ID кадр. Отличается от hybrid (эмиссия из ISR-контекста) — сравнение фиксирует эту разницу (T_fs: ISR-emission vs task-deferral).
+- 4 задачи slice (safety 5 / sensing 4 / actuator 2 / observability 1) + kernel control task (drain bounded work queue из `schedule()`); watchdog reload на границах шагов задач + idle hook (НЕ в tick hook  -  иначе F5 starvation маскируется).
+- Force-stop семантика: bumper ISR → `xTaskNotifyFromISR` → safety task (преемпшн по приоритету) → funnel ForceStop intent → actuator task эмитит min-ID кадр. Отличается от hybrid (эмиссия из ISR-контекста)  -  сравнение фиксирует эту разницу (T_fs: ISR-emission vs task-deferral).
 - Сборка: `firmware-rtos` SUCCESS (RAM 7.1%: ядро + 4 задачи); `lib_compat_mode=off` (пакет декларирует `frameworks: stm32cube`), include-пути либы явные (add_config.py не пробрасывает их в project-src).
-- Host-нога: официального host-порта нет — host-лега RTOS-variant покрывает kernel-независимую логику (арбитраж, health, очереди — те же тесты), исполнение - target. Фиксируется в отчёте как ограничение сравнения.
+- Host-нога: официального host-порта нет  -  host-лега RTOS-variant покрывает kernel-независимую логику (арбитраж, health, очереди  -  те же тесты), исполнение - target. Фиксируется в отчёте как ограничение сравнения.
 
 ## 4. Synthetic loads (обязательные, issue 10)
 
@@ -136,7 +136,7 @@
 | #14 | I2C recovery при параллельной BMS | recovery ≤ 16 SCL, cooldown ≥ 5 s; Degraded своевременно | L5 + L9 | target |
 | #15 | radio AUX-hang, mode-settle | ожидание неблокирующее; ни один шаг > T_step | AUX hold: split по bounded под-шагам | target (или HIL radio as-needed, #52 §5.3) |
 
-Переводы obligations в следующий шаг (допускаются acceptance #54; host-only решение владельца 2026-08-12 — целевое железо недоступно, перевод в implementation-карту с методом закрытия по #52 §5.3):
+Переводы obligations в следующий шаг (допускаются acceptance #54; host-only решение владельца 2026-08-12  -  целевое железо недоступно, перевод в implementation-карту с методом закрытия по #52 §5.3):
 
 | Obl | Статус на host-only slice | Закрытие в implementation-карте |
 | --- | --- | --- |
@@ -151,10 +151,10 @@
 | #11 | power-cut: - (нет железа) | L5 (HIL, #52 §6.2): save/update/mid-op |
 | #12 | host: log-storm тест (ни один шаг > T_step, sim CPU-cost) | L4/L5: неблокирующий TX |
 | #13 | host: RX/TX flood тесты + sim (drain CPU ≤ T_step); физический слой | L4/L5: CAN-инъектор |
-| #14 | I2C-recovery модель (≤ 16 SCL, cooldown ≥ 5 s) — host FSM-тесты | L5: stuck-инъекция при BMS |
+| #14 | I2C-recovery модель (≤ 16 SCL, cooldown ≥ 5 s)  -  host FSM-тесты | L5: stuck-инъекция при BMS |
 | #15 | radio AUX-hang: - (нет радио на host) | L5: AUX-hold (as-needed) |
 
-Target-нога скелета (firmware envs) собирается и линкуется (coop/hybrid/rtos SUCCESS), но исполнение на железе и все target-измерения — implementation-карта. Прошивка НЕ является верифицированным артефактом без bring-up (#51 §15: validation obligation первого bring-up остаётся открытой).
+Target-нога скелета (firmware envs) собирается и линкуется (coop/hybrid/rtos SUCCESS), но исполнение на железе и все target-измерения  -  implementation-карта. Прошивка НЕ является верифицированным артефактом без bring-up (#51 §15: validation obligation первого bring-up остаётся открытой).
 
 ## 7. Evidence-протокол
 
@@ -185,13 +185,13 @@ Target-нога скелета (firmware envs) собирается и линк�
 
 Параметры (источники): DS8626 Table 40 (tERASE128KB = 4 s, tPROG = 100 µs/слово), каденции и бюджеты #48 §5/§7, V1-индекс (baud, ToF-слот 8 ms, I2C 100 kHz, кодовая оценка чтения ToF ~1.2–1.5 ms).
 
-Сценарии sim (тесты native): C1-цепочка с wire/CPU-временем (stale → stop: T_fresh + T_eso ≤ 370 ms и T_eso ≤ 70 ms на симулированных параметрах), flash-окно (W_flash 4 s > T_step — единственное разрешённое исключение, quiescent, watchdog-окно 6.8 s держит), CAN flood (RX drain CPU ≤ T_step при > 64 кадров/тик), combined load (сумма CPU-cost шагов тика ≤ T_step). Результаты - `host-simulation`, никогда не called measured (правило #48 §1); маркируются в отчёте отдельным классом evidence.
+Сценарии sim (тесты native): C1-цепочка с wire/CPU-временем (stale → stop: T_fresh + T_eso ≤ 370 ms и T_eso ≤ 70 ms на симулированных параметрах), flash-окно (W_flash 4 s > T_step  -  единственное разрешённое исключение, quiescent, watchdog-окно 6.8 s держит), CAN flood (RX drain CPU ≤ T_step при > 64 кадров/тик), combined load (сумма CPU-cost шагов тика ≤ T_step). Результаты - `host-simulation`, никогда не called measured (правило #48 §1); маркируются в отчёте отдельным классом evidence.
 
 ## 15. PCB-референс ControllerV6
 
 - **Факт** (владелец): референс платы - `C:\Projects\Shuttle\ShuttleController\docs\ControllerV6` (KiCad-проект: `ControllerV6.kicad_sch`/`.kicad_pcb`/`.step`, BOM `ControllerV6.csv`, netlist `ControllerV6.txt`, Gerber, даташиты Waveshare ToF B/D и Chipanalog CA-IS3020S).
 - BOM-факты: разъёмы Lifter DOWN, BUZZER, UART_ESP32, Pallet4, RS485, Log_UART, WS_Sensor6 и др.
-- Роль в этой карте: **документальный ресурс** для implementation-карты (bring-up, пины, сенсоры, изоляция CA-IS3020S). Полное извлечение пинов из KiCad-схемы и сверка с hardware-контрактом #51 §4/#43 — задача implementation-карты (первый bring-up), не этой. Сверка V6 vs производственная PCB (та, что под V1-кодом) — неизвестна и фиксируется как Unknown.
+- Роль в этой карте: **документальный ресурс** для implementation-карты (bring-up, пины, сенсоры, изоляция CA-IS3020S). Полное извлечение пинов из KiCad-схемы и сверка с hardware-контрактом #51 §4/#43  -  задача implementation-карты (первый bring-up), не этой. Сверка V6 vs производственная PCB (та, что под V1-кодом)  -  неизвестна и фиксируется как Unknown.
 
 ## 16. Ссылки
 
