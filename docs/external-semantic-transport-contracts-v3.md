@@ -2,8 +2,8 @@
 
 Статус: **In Review - profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем (Q1-Q26) в тикете [«Специфицировать protocol V3 (wire, transport profiles, negotiation, security)»](https://github.com/Driadix/ShuttleControllerV3/issues/47)**.
 Logical item 6 нормативного пакета (issue 8), gate G3.
-Входы: semantic contract ([#13](https://github.com/Driadix/ShuttleControllerV3/issues/13), `docs/semantic-contract-v3.md`), system context ([#2](https://github.com/Driadix/ShuttleControllerV3/issues/2)), architecture/queues/Time ([#43](https://github.com/Driadix/ShuttleControllerV3/issues/43), `docs/software-architecture-boundaries-v3.md`), lifecycle ([#46](https://github.com/Driadix/ShuttleControllerV3/issues/46), `docs/lifecycle-axes-v3.md`), safety domain conditions ([#45](https://github.com/Driadix/ShuttleControllerV3/issues/45); wire registry здесь).
-Термины - `CONTEXT.md`. Совместимость wire с V1/V7 **не требуется**. Реализация внешних клиентов и адаптеров (UI дисплея, HTTP/JSON, WMS) **вне scope** этой карты.
+Входы: semantic contract ([#13](https://github.com/Driadix/ShuttleControllerV3/issues/13), `docs/semantic-contract-v3.md`), system context ([#2](https://github.com/Driadix/ShuttleControllerV3/issues/2)), architecture/queues/Time ([#43](https://github.com/Driadix/ShuttleControllerV3/issues/43), `docs/software-architecture-boundaries-v3.md`), lifecycle ([#46](https://github.com/Driadix/ShuttleControllerV3/issues/46), `docs/lifecycle-axes-v3.md`), safety domain conditions ([#45](https://github.com/Driadix/ShuttleControllerV3/issues/45); wire registry здесь).  
+Термины — `CONTEXT.md`. Совместимость wire с V1/V7 **не требуется**. Реализация внешних клиентов и адаптеров (UI дисплея, HTTP/JSON, WMS) **вне scope** этой карты.
 
 ## 1. Назначение и границы
 
@@ -43,7 +43,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 
 - **Contract core:** canonical binary framing + typed payloads (не CBOR/protobuf как обязательный core).
 - **Profile:** physical/framing wrapper, MTU/byte-budget defaults, link-loss hooks, default interest hints; **не** отдельный dialect смысла.
-- JSON/gRPC/HTTP и UI - преобразования **на network bridge**, не на контроллере.
+- JSON/gRPC/HTTP и UI — преобразования **на network bridge**, не на контроллере.
 
 ## 3. Transport profiles (Q3/Q6/Q7/Q8)
 
@@ -61,7 +61,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 **Hard (норма profile):**
 
 - framing wrapper (например E22 `{addh,addl,channel}` перед core frame на radio; raw core frame на network_bridge UART);
-- MTU / bytes-per-tick / depth budgets (числа - #48);
+- MTU / bytes-per-tick / depth budgets (числа — #48);
 - link detection / RX frame timeout hooks;
 - **effective profile** определяется контроллером по **ingress adapter / provisioned endpoint**, не по client field;
 - **mutating Update-class допускается только когда effective profile = `network_bridge`**.
@@ -70,7 +70,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 
 - какие optional queries/subscriptions/streams активны;
 - client-chosen cadence/interest (trusted clients);
-- radio «просит меньше» - usage client, не запрет protocol core.
+- radio «просит меньше» — usage client, не запрет protocol core.
 
 **Общие hard gates (не «магия порта»):** authority/role admission, unprovisioned surface, exclusive slot, platform window, health/provisioning guards, queue overload reject.
 
@@ -86,10 +86,10 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 | sync0 | sync1 | header | payload | frameChecksum |
 ```
 
-- `sync` - фиксированные байты versioned framing (конкретные значения в schema table; **не** обязаны совпадать с V1 `0xBB 0xCC`).
+- `sync` — фиксированные байты versioned framing (конкретные значения в schema table; **не** обязаны совпадать с V1 `0xBB 0xCC`).
 - `header` (минимум): `protocolMajor`, `msgFamily`, `msgType`, `queueClass`, `flags`, `frameSeq`, `payloadLen`.
-- `payload` - little-endian typed record по `(msgFamily, msgType, protocolVersion)`.
-- `frameChecksum` - integrity против **случайной** порчи (CRC-класс). **Не** является security authenticity/MAC.
+- `payload` — little-endian typed record по `(msgFamily, msgType, protocolVersion)`.
+- `frameChecksum` — integrity против **случайной** порчи (CRC-класс). **Не** является security authenticity/MAC.
 
 ### 4.2 Fixed identity widths
 
@@ -98,7 +98,7 @@ Logical item 6 нормативного пакета (issue 8), gate G3.
 | `controllerEpoch` | u32 | opaque boot-instance; controller-authored |
 | `requestId` | u32 | unique per `(controllerEpoch, authorityId)` logical request |
 | `operationId` | u32 | controller-authored after accept; never client-supplied as identity |
-| `authorityId` | u16 | controller-assigned at handshake; payload echo only - never sole resolver of principal |
+| `authorityId` | u16 | controller-assigned at handshake; payload echo only — never sole resolver of principal |
 | `bridgePrincipalHandle` | u16 | bridge-asserted on **every** principal-scoped frame on effective `network_bridge`; maps to authorityId |
 | `sessionId` | u16 | manual session instance |
 | `sessionSeq` | u16 | monotonic per session |
@@ -119,7 +119,7 @@ Strings/UUID на hot path **не** используются.
 
 ### 5.1 Mandatory handshake
 
-Mutating traffic (Control/Service/Update, session open, config set, time-set, stop intents that mutate) **запрещён** до успешного handshake на данном link/principal и после смены `controllerEpoch` - до refresh.
+Mutating traffic (Control/Service/Update, session open, config set, time-set, stop intents that mutate) **запрещён** до успешного handshake на данном link/principal и после смены `controllerEpoch` — до refresh.
 
 **Controller → client (advertise):**
 
@@ -128,16 +128,16 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 - `firmwareIdentity` (type/build id opaque);
 - `effectiveProfileId` (controller-derived **transport profile** from ingress; authoritative);
 - `supportedCapabilities` (bitmask/set);
-- profile-relevant limit flags (без обязательных чисел budgets - они в #48, могут advertise как opaque limit class later);
+- profile-relevant limit flags (без обязательных чисел budgets — они в #48, могут advertise как opaque limit class later);
 - assigned `authorityId` + **granted** role set / capability grant for this principal (controller-authored).
 
 `effectiveProfileId`/`expectedProfileId` в handshake относятся только к транспортным профилям `network_bridge` и `radio`; они не являются профилем шаттла и не переименовываются в shuttle-profile query.
 
 **Client → controller (hello / interest):**
 
-- `expectedProfileId` (`network_bridge` | `radio`) - **неавторитетное** ожидание клиента для fail-fast mismatch; **не** выбирает effective profile;
+- `expectedProfileId` (`network_bridge` | `radio`) — **неавторитетное** ожидание клиента для fail-fast mismatch; **не** выбирает effective profile;
 - optional `endpointInstanceHint` (non-authoritative label for logs; **не** identity proof и **не** multi-principal handle);
-- на effective `network_bridge` (см. ниже): **`bridgePrincipalHandle`** (u16) - bridge-asserted principal selector;
+- на effective `network_bridge` (см. ниже): **`bridgePrincipalHandle`** (u16) — bridge-asserted principal selector;
 - **requested** roles interest / `clientCapabilities` (заявки, не права).
 
 **Effective profile (anti-spoof):**
@@ -151,12 +151,12 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
 **Назначение principal / `authorityId` (channel-trust, без crypto session на wire контроллера):**
 
 - `authorityId` **всегда назначает контроллер**. Клиент конечного UI **не** self-binds identity.
-- **Resolver principal (норматив):** контроллер **никогда** не выбирает principal только по payload `authorityId`.
-  - effective `radio` → principal = map(radio ingress/endpoint);
+- **Resolver principal (норматив):** контроллер **никогда** не выбирает principal только по payload `authorityId`.  
+  - effective `radio` → principal = map(radio ingress/endpoint);  
   - effective `network_bridge` → principal = map(bridgeEndpointId, bridgePrincipalHandle) на **каждом** principal-scoped кадре.
 
 - **effective `radio`:** ровно **один** principal на radio ingress/endpoint. Поле `bridgePrincipalHandle` **запрещено** (присутствует → `InvalidEnvelope` / `Unauthorized`).
-- **effective `network_bridge` - multi-principal через bridge-asserted handle:**
+- **effective `network_bridge` — multi-principal через bridge-asserted handle:**
   1. Физически у контроллера один bridge ingress; multiplex downstream TCP/UI клиентов делает **provisioned bridge** (доверенный peer channel-trust), не контроллер.
   2. Bridge **обязан** на hello и на **каждом** последующем principal-scoped кадре (mutating Control/Service/Update/Session, handshake refresh) ставить **`bridgePrincipalHandle`** (u16) в transport/header envelope (не «только payload по желанию клиента»).
   3. Handle opaque; bridge ассоциирует 1:1 с одним своим authenticated/authorized downstream client. Поле авторитетно **только** потому что кадр пришёл на effective `network_bridge` ingress от provisioned bridge. **Не** credential конечного пользователя; **не** действительно на radio.
@@ -171,10 +171,10 @@ Mutating traffic (Control/Service/Update, session open, config set, time-set, st
      - Unknown/unmapped handle → reject `Unauthorized` / `HandshakeRequired`.
      - Payload may **echo** `authorityId` for client correlation; if present and `≠ resolvedAuthorityId` → reject `Unauthorized` (client A cannot act as client B by stuffing B's id).
      - Controller admission, idempotency ledger, grants use **resolvedAuthorityId only**.
-  7. **Bridge obligation:** for each downstream connection the bridge MUST (a) allocate a handle obeying no-reassign-in-epoch, (b) fix that handle for the connection after its auth, (c) stamp it on every principal-scoped frame, (d) **rewrite or drop** any client-supplied attempt to present another connection's `authorityId`/handle, (e) on disconnect either reconnect same client with same handle or assign a fresh never-used-in-epoch handle to a new client - never silently repoint an in-epoch handle at a different client. Failure of (c)/(d)/(e) is a bridge defect; controller still enforces (5)/(6).
+  7. **Bridge obligation:** for each downstream connection the bridge MUST (a) allocate a handle obeying no-reassign-in-epoch, (b) fix that handle for the connection after its auth, (c) stamp it on every principal-scoped frame, (d) **rewrite or drop** any client-supplied attempt to present another connection's `authorityId`/handle, (e) on disconnect either reconnect same client with same handle or assign a fresh never-used-in-epoch handle to a new client — never silently repoint an in-epoch handle at a different client. Failure of (c)/(d)/(e) is a bridge defect; controller still enforces (5)/(6).
   8. Смена handle = смена principal (нужен handshake/grant для нового handle). `endpointInstanceHint` **никогда** не участвует в map.
 
-- Заявленные role/capability fields - только **requests**. Grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports. Вне grant → `Unauthorized` / `RoleEscalation`.
+- Заявленные role/capability fields — только **requests**. Grant ⊆ allowed(principal) ∩ requested ∩ controllerSupports. Вне grant → `Unauthorized` / `RoleEscalation`.
 - Отсутствие crypto session на wire **не** означает self-asserted authority.
 
 **Правила:**
@@ -217,7 +217,7 @@ Threat model core v3: **channel-trust by deployment** (локальный bridge
 | Capability gates + **effective** profile hard rules | Update-class only on effective network_bridge; feature surface; profile spoof rejected | rights beyond grant / claimed profileId |
 | **`bridgePrincipalHandle` on effective network_bridge only** | distinct principals behind one bridge UART under provisioned-bridge trust | end-user auth; not valid on radio; not replaceable by endpointInstanceHint |
 | OTA image checksum + signature fields | authenticity/integrity **of image bytes** | authorization to begin/abort/pause update transaction (Update Authority + admission + grant) |
-| Transport MAC/TLS | - | **not in core v3**; future capability/profile extension |
+| Transport MAC/TLS | — | **not in core v3**; future capability/profile extension |
 | Bridge-side client auth (outside controller wire) | which downstream client the bridge maps to a handle | end-to-end crypto to controller |
 
 Explicit non-claims: no hostile-RF confidentiality, no mutual auth crypto session on controller wire in core.
@@ -255,8 +255,8 @@ Family boundaries существуют для policy/tests; плоский V1 Ms
 | logs | reserved capacity; drop-newest |
 | traces | bounded; drop policy as traces class (prefer drop-oldest for volume streams; reserved for fault-correlated traces if flagged) |
 
-Каждый drop/reject → counter (Observability Producer) + event.
-`queueClass` присутствует на wire (explicit). Profile задаёт budgets, не другую policy.
+Каждый drop/reject → counter (Observability Producer) + event.  
+`queueClass` присутствует на wire (explicit). Profile задаёт budgets, не другую policy.  
 Force-stop на CAN **вне** этих очередей и **вне** client protocol.
 
 ## 9. Operation request / ACK encoding (Q9, Q16, #13)
@@ -277,7 +277,7 @@ Stop/cancel: control intent referencing `operationId`; idempotent; not a new ope
 
 ## 10. Manual session wire (Q13, #46)
 
-- Open/close - Control admission; **`operationId` не выдаётся**.
+- Open/close — Control admission; **`operationId` не выдаётся**.
 - Active: `sessionId` + monotonic `sessionSeq` per hold-to-run intent.
 - Stale/duplicate `sessionSeq` → reject; does not refresh lease.
 - Fresh valid intent refreshes lease (lease counters owned by Manual Session domain).
@@ -314,7 +314,7 @@ Rules:
 - maps to Update queue class + lifecycle axis Staging/Applying/… (#46);
 - image **checksum + signature** fields mandatory at finalize/begin as schema;
 - signature verifies **image**, not the right to run the transaction;
-- Applying/boot/slots/bootloader/W_apply - #50 / #48 / proving slice;
+- Applying/boot/slots/bootloader/W_apply — #50 / #48 / proving slice;
 - radio may receive **read-only** update status if capability present; cannot mutate.
 
 ## 13. Config / provisioning surface split (Q21)
@@ -331,9 +331,9 @@ Rules:
 
 ## 14. Observability delivery (Q22, #2, #43)
 
-- **Query snapshot** - authoritative reconciliation model (includes `controllerEpoch`).
-- **Subscriptions** - bounded agreements; parameters limited by caps + budgets.
-- **Streams** - telemetry/events/logs/traces as four outbound classes.
+- **Query snapshot** — authoritative reconciliation model (includes `controllerEpoch`).
+- **Subscriptions** — bounded agreements; parameters limited by caps + budgets.
+- **Streams** — telemetry/events/logs/traces as four outbound classes.
 - No mandatory continuous push without subscription or explicit profile default capability.
 - Events do not replace query after delivery loss.
 - Fault/warning bits in telemetry must use registry codes (below), not ad-hoc strings as sole signal.
@@ -354,7 +354,7 @@ Rules:
 | Transport | RX frame timeout, ACK wait, link-quiet | drop partial frame / declare link degraded / transport error codes |
 | Semantic | lease, type link-loss policy, epoch | session stop; op continue/controlled_stop/fail_safe per type; EpochMismatch |
 
-Link-loss **не** означает автоматическую отмену всех операций. Числовые значения - #48.
+Link-loss **не** означает автоматическую отмену всех операций. Числовые значения — #48.
 
 ## 16. Layered registries (Q16, #45)
 
@@ -383,7 +383,7 @@ Minimum set (extensible):
 - `ProfileMismatch` (client `expectedProfileId` ≠ controller `effectiveProfileId`)
 - `ProfileNotQualified` (`configured/requestedShuttleProfileId` поддерживается binary, но отсутствует в `qualifiedShuttleProfileIds`; reject выполняется до изменения RAM, journal или lifecycle)
 - `SequenceStale`
-- `BusyRejected` (class full)
+- `BusyRejected` (class full)  
   (plus type-precondition codes as catalog evolves)
 
 ### 16.3 OperationOutcomeCode
@@ -410,23 +410,23 @@ Terminal typed codes per operation type docs + common `Cancelled`/`Failed` famil
 
 ## 18. Verification obligations (contract-level)
 
-1. Schema/contract tests: frame parse, checksum fail, payload version matrix.
-2. Handshake required before mutating; post-reboot epoch refresh.
-3. Capability intersection and major mismatch.
-4. Dual-plane correlation: retry same `requestId`; `frameSeq` reuse does not create new logical request.
-5. Negative ACK never carries `operationId`.
-6. Queue class overload: reject vs drop-oldest vs drop-newest behaviors + counters.
-7. Update mutating denied on **effective** radio (`ProfileDenied`) even if payload claims otherwise.
-8. Session stale `sessionSeq` does not refresh lease.
-9. `SetWallClock` does not move monotonic timers (property test).
-10. Multi-principal on bridge: two different `bridgePrincipalHandle` values on effective network_bridge get distinct `authorityId` and separate idempotency ledgers; second exclusive activity → `ResourceConflict`.
-11. No hidden semantics checklist (G3 item): external client with registries+schema alone can decode admissions, outcomes, faults.
-12. Authority binding: principal resolved from ingress (+ handle on bridge), never from client-chosen `authorityId` alone; payload id is echo; mismatch with resolved → `Unauthorized`.
-13. **Impersonation / claimed-role escalation:** request with role or capability outside handshake grant → `RoleEscalation`/`Unauthorized`; endpoint/profile alone never implies Update Authority without grant.
-14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) handle on radio → reject; (e) missing handle on bridge hello or principal-scoped frame → reject; (f) **cross-principal spoof:** handle=A + payload authorityId=B → reject; (g) **handle lifetime:** after H→authorityA, disconnect, reconnect **same** client with H → still authorityA; (h) **no reassign:** bridge must not map H to a different client in-epoch - controller continues treating H as authorityA for entire epoch (burned handle); new client requires unused handle; epoch change clears map.
+1. Schema/contract tests: frame parse, checksum fail, payload version matrix.  
+2. Handshake required before mutating; post-reboot epoch refresh.  
+3. Capability intersection and major mismatch.  
+4. Dual-plane correlation: retry same `requestId`; `frameSeq` reuse does not create new logical request.  
+5. Negative ACK never carries `operationId`.  
+6. Queue class overload: reject vs drop-oldest vs drop-newest behaviors + counters.  
+7. Update mutating denied on **effective** radio (`ProfileDenied`) even if payload claims otherwise.  
+8. Session stale `sessionSeq` does not refresh lease.  
+9. `SetWallClock` does not move monotonic timers (property test).  
+10. Multi-principal on bridge: two different `bridgePrincipalHandle` values on effective network_bridge get distinct `authorityId` and separate idempotency ledgers; second exclusive activity → `ResourceConflict`.  
+11. No hidden semantics checklist (G3 item): external client with registries+schema alone can decode admissions, outcomes, faults.  
+12. Authority binding: principal resolved from ingress (+ handle on bridge), never from client-chosen `authorityId` alone; payload id is echo; mismatch with resolved → `Unauthorized`.  
+13. **Impersonation / claimed-role escalation:** request with role or capability outside handshake grant → `RoleEscalation`/`Unauthorized`; endpoint/profile alone never implies Update Authority without grant.  
+14. **Bridge principal handle:** (a) two handles → two authorityIds; (b) same handle re-hello → same authorityId in epoch; (c) `endpointInstanceHint` alone never splits principals; (d) handle on radio → reject; (e) missing handle on bridge hello or principal-scoped frame → reject; (f) **cross-principal spoof:** handle=A + payload authorityId=B → reject; (g) **handle lifetime:** after H→authorityA, disconnect, reconnect **same** client with H → still authorityA; (h) **no reassign:** bridge must not map H to a different client in-epoch — controller continues treating H as authorityA for entire epoch (burned handle); new client requires unused handle; epoch change clears map.  
 15. **Profile spoofing:** frame on radio ingress with `expectedProfileId=network_bridge` → `ProfileMismatch` / no network_bridge privileges; UpdateBegin on radio ingress → `ProfileDenied` regardless of claimed expected profile.
 
-Численные stress bounds - #48; HIL - verification pyramid #52.
+Численные stress bounds — #48; HIL — verification pyramid #52.
 
 ## 19. Deferred / handoffs
 

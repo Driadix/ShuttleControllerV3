@@ -2,7 +2,7 @@
 
 Статус: **In Review - profile qualification acceptance rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем и независимо reviewed в тикете [«Спроектировать verification pyramid V3 (item 12)»](https://github.com/Driadix/ShuttleControllerV3/issues/52)**. Вход в logical item `Verification Strategy & Acceptance` нормативного пакета (issue 8, gate G5) и в architecture proving slice (тикет #54). Каждый метод, oracle и бюджет имеет источник; бюджеты-лимиты - из `docs/quality-attributes-and-budgets-v3.md` (#48).
 
-Термины - канонические из `CONTEXT.md`. Исполнение - cooperative scheduler с bounded run-to-completion steps (issue 10), ports-and-adapters (#43), safety-модель (#45), наблюдаемость (#49), production lifecycle (#50).
+Термины — канонические из `CONTEXT.md`. Исполнение — cooperative scheduler с bounded run-to-completion steps (issue 10), ports-and-adapters (#43), safety-модель (#45), наблюдаемость (#49), production lifecycle (#50).
 
 ## 1. Назначение и входы
 
@@ -12,7 +12,7 @@
 
 ## 2. Пирамида: уровни, среды, методы
 
-Пять уровней + полевая зона. Пирамида - правая ветвь V-model (ISO 26262-6: unit → integration → embedded software testing; лестница MIL/SIL/PIL/HIL в терминологии model-based development).
+Пять уровней + полевая зона. Пирамида — правая ветвь V-model (ISO 26262-6: unit → integration → embedded software testing; лестница MIL/SIL/PIL/HIL в терминологии model-based development).
 
 | Уровень | Что проверяется | Среда | Метод | Каденция |
 | --- | --- | --- | --- | --- |
@@ -26,33 +26,33 @@
 Решения владельца:
 
 - **L3 = host-интеграция с adapter fakes**; instruction-set simulation (Renode/QEMU) и plant model **отклонены** (Q1, SIL-вопрос). L3 выполняет роль software-in-the-loop слоя: production-логика исполняется на host против симулированных интерфейсов (fakes); слово «simulation» в названии уровня означает симуляцию интерфейсов, а не физики.
-- **Граница L4/L5**: L4 - плата без механики; L5 - стенд с fault-injection и управляемым питанием; полный шаттл - field-зона implementation-карты (правило карты: каждая операция проверяется на реальном шаттле при переносе).
-- **Состав bench (L4)**: плата + ST-Link; CAN-пир или инъектор (adapter duration bounds, watchdog под нагрузкой), I2C-сенсоры или симулятор, нагрузочный скрипт по bridge; захват таймингов - периодические события с monotonicTick и временные метки (envelope #49 §2.1).
-- **O3 на L4 (механизм)**: доменные векторы исполняются в тестовой сборке (зеркальные флаги #51 §4) с отчётом через bridge; производственная сборка - только L5 (там oracle O4/железо).
+- **Граница L4/L5**: L4 — плата без механики; L5 — стенд с fault-injection и управляемым питанием; полный шаттл — field-зона implementation-карты (правило карты: каждая операция проверяется на реальном шаттле при переносе).
+- **Состав bench (L4)**: плата + ST-Link; CAN-пир или инъектор (adapter duration bounds, watchdog под нагрузкой), I2C-сенсоры или симулятор, нагрузочный скрипт по bridge; захват таймингов — периодические события с monotonicTick и временные метки (envelope #49 §2.1).
+- **O3 на L4 (механизм)**: доменные векторы исполняются в тестовой сборке (зеркальные флаги #51 §4) с отчётом через bridge; производственная сборка — только L5 (там oracle O4/железо).
 
 ## 3. Oracle-модель (Q2)
 
-Четыре класса oracle; V1 **не является** oracle (правило карты: V1 - свидетельства, не норматив).
+Четыре класса oracle; V1 **не является** oracle (правило карты: V1 — свидетельства, не норматив).
 
 | Oracle | Что является источником истины | Где применяется |
 | --- | --- | --- |
 | **O1 инвариантный/property** | safety-инварианты INV-* (#45 §3), инварианты очередей/overload (#43 §6), single-writer ownership, wrap-семантика monotonic (#49 §2.1) | L2 (PBT), L3 (сквозные) |
 | **O2 контрактный/reference** | semantic contract (#13: admission, outcomes, lifecycle), protocol schema (#47), алгоритмическая документация (#15, #16, #30–42: инвариант Succeeded ⇔ цель достигнута, классификация путей) | L2/L3 (контрактные тесты, wire-тесты) |
 | **O3 host-target equivalence** | одинаковые тестовые векторы на native и target-сборке; расхождение доменного поведения = дефект (back-to-back, ISO 26262-6) | L2→L4 (перенос векторов) |
-| **O4 measured-vs-budget** | observed maxima с workload metadata (протокол кампании - §6.3) vs бюджеты #48 + margin (NASA SWEHB 9.12/9.14 практика); на HIL - реакция vs limit (практика Rockwell/Siemens, ISO 13849-2) | L4/L5 (тайминги, ресурсы) |
+| **O4 measured-vs-budget** | observed maxima с workload metadata (протокол кампании — §6.3) vs бюджеты #48 + margin (NASA SWEHB 9.12/9.14 практика); на HIL — реакция vs limit (практика Rockwell/Siemens, ISO 13849-2) | L4/L5 (тайминги, ресурсы) |
 
 Инструменты:
 
-- **RapidCheck** для property-тестов (header-only, C++17, dev-only зависимость, интеграция с GoogleTest; версия пинится по политике #51 §3). При флейках генераторов в CI - фиксированные seed'ы.
-- **Структурированный fuzz парсера кадров** + admission-путь на host (метод L2/L3, oracle O1/O2: инварианты + не-краш; практика ECUFuzz, ISSTA 2025). Fuzz-гарнесы - dev-only, вне production-сборки.
+- **RapidCheck** для property-тестов (header-only, C++17, dev-only зависимость, интеграция с GoogleTest; версия пинится по политике #51 §3). При флейках генераторов в CI — фиксированные seed'ы.
+- **Структурированный fuzz парсера кадров** + admission-путь на host (метод L2/L3, oracle O1/O2: инварианты + не-краш; практика ECUFuzz, ISSTA 2025). Fuzz-гарнесы — dev-only, вне production-сборки.
 
-Критерий прохождения: тест проходит по своему oracle; тайминговые тесты - по O4 (measured ≤ бюджет + margin); analytical-оценки не называются measured (#48 §1).
+Критерий прохождения: тест проходит по своему oracle; тайминговые тесты — по O4 (measured ≤ бюджет + margin); analytical-оценки не называются measured (#48 §1).
 
 ## 4. Назначение verification attributes (G5 closure)
 
 Каждый requirement и hazard получает строку verification matrix (derived view, issue 8): `method · oracle · environment · evidence type`.
 
-- **Method**: review (independent) / automated checks & static analysis (lint, schema-валидация, include-lint; в ISO 26262-6 inspection - ручная техника, у нас она покрыта review) / analysis (source/static proof) / test (host/target) / measurement (тайминги, ресурсы) / commissioning (ручной per-device).
+- **Method**: review (independent) / automated checks & static analysis (lint, schema-валидация, include-lint; в ISO 26262-6 inspection — ручная техника, у нас она покрыта review) / analysis (source/static proof) / test (host/target) / measurement (тайминги, ресурсы) / commissioning (ручной per-device).
 - **Oracle**: O1–O4 (раздел 3).
 - **Environment**: CI-host / bench / HIL / field.
 - **Evidence type**: CI-artifact (JUnit/JSON/logs) / evidence record (стабильный, docs) / measurement report (observed maxima + workload metadata) / commissioning record (внешний журнал ТО) / review record.
@@ -61,7 +61,7 @@
 
 | Hazard | Method | Oracle | Environment | Evidence type |
 | --- | --- | --- | --- | --- |
-| HZ-01 (потеря сенсорики) | measurement + test | O4 (T_eso ≤ 70 ms) + O1 (INV-SENSING-FRESH); D_accept (D_brake, v_max_phys) - field (§5.2) | HIL + host (+ field) | measurement report + CI-artifact |
+| HZ-01 (потеря сенсорики) | measurement + test | O4 (T_eso ≤ 70 ms) + O1 (INV-SENSING-FRESH); D_accept (D_brake, v_max_phys) — field (§5.2) | HIL + host (+ field) | measurement report + CI-artifact |
 | HZ-02 (bumper/столкновение) | measurement | O4 (T_fs ≤ 10 ms, latch, crash counter) | HIL | measurement report |
 | HZ-03 (отказ CAN) | measurement + commissioning | O4 + per-device commissioning-тест (Q7.1 A) | HIL + field | measurement report + commissioning record |
 | HZ-04 (инверсия команды) | test | O1 (property: переходы, admission) | host | CI-artifact |
@@ -76,7 +76,7 @@
 | HZ-16 (перегрев) | test | O1 (health FSM, пороги 90/110 °C) | host (+field: телеметрия) | CI-artifact |
 | HZ-17 (BMS staleness) | test | O1 (staleness-логика, T_bms_stale = 120 s) | host | CI-artifact |
 
-Инварианты без прямого hazard-хозяина: **INV-EVACUATION-BOUNDED** (эвакуация - авторизованный bounded SAFETY_MOTION, доступен в Fault, #45 §4) - O1 property (границы, авторизация Safety Authority, bounded метаданные), host, CI-artifact (L2); INV-WATCHDOG-ARMED - покрыт acceptance #4 (§6.3) и host-инвариантами reload-политики; INV-STARTUP-GATE - startup-to-Ready ≤ 5 s (L4).
+Инварианты без прямого hazard-хозяина: **INV-EVACUATION-BOUNDED** (эвакуация — авторизованный bounded SAFETY_MOTION, доступен в Fault, #45 §4) — O1 property (границы, авторизация Safety Authority, bounded метаданные), host, CI-artifact (L2); INV-WATCHDOG-ARMED — покрыт acceptance #4 (§6.3) и host-инвариантами reload-политики; INV-STARTUP-GATE — startup-to-Ready ≤ 5 s (L4).
 
 ## 5. Распределение obligations (Q3)
 
@@ -88,7 +88,7 @@
 
 ### 5.2 Полевые obligations (implementation-карта)
 
-D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), ATEMP-пороги при типовой нагрузке, availability ≥ 99.5% - полевые измерения при переносе функционала; результаты - release-evidence поля (measurement records с workload metadata).
+D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), ATEMP-пороги при типовой нагрузке, availability ≥ 99.5% — полевые измерения при переносе функционала; результаты — release-evidence поля (measurement records с workload metadata).
 
 ### 5.3 Production-пирамида: обязательное и по необходимости
 
@@ -96,7 +96,7 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 | --- | --- | --- |
 | C1 event→safe-output, force-stop T_fs, lease T_lease_stop, watchdog starvation, power-cut update E2E + W_apply, CAN flood → control-plane | **mandatory** (release gate) | L5 (раздел 6) |
 | Host-логика obligations: #9 NTP-скачок; #49 #4 (fault-capture assembly ≤ 512 Б), #6 (integrity-скан, journalFull), #7 (подписки/gap re-sync), #9 (лимиты журнала, wrap, plausibility SetWallClock, RFC 5424); #50 host-часть (Finalize-валидация вкл. load_address mismatch; counter-семантика: Finalize не повышает accepted_counter, commit повышает атомарно; rollback к меньшему counter → DowngradeDenied; FactoryReset generation-bump; ClearFault admission; JournalFull; power-cut mid-provisioning → старый снапшот) | постоянная (реализуется как unit/property-тесты при реализации модулей) | L2 |
-| #49 #5 (crash-запись через reboot), #8 (reset-cause счётчики), #11 (backup-domain loss); #50 target-часть (verified boot, bootcount, pointer/pending/commit, персистированный фолбэк bootloader - указатель == исполняемый слот, status sector-full, rollback_flag → событие rollback-причина) | постоянная | L4 |
+| #49 #5 (crash-запись через reboot), #8 (reset-cause счётчики), #11 (backup-domain loss); #50 target-часть (verified boot, bootcount, pointer/pending/commit, персистированный фолбэк bootloader — указатель == исполняемый слот, status sector-full, rollback_flag → событие rollback-причина) | постоянная | L4 |
 | #49 #10 (radio-трафик: events-резерв не вытесняется telemetry-подпиской; snapshot-ответ radio ≤ 2 фрагмента) | постоянная (host: подписочная машина, fake link) + as-needed (HIL radio-трафик) | L2 + L5 |
 | I2C stuck при BMS (#14), radio AUX-hang (#15), log-storm (#12), power-cut save/mid-op, BMS low-SOC, flash-stall ISR latency (#3), CAN физический слой | **as-needed** (по классу изменения) | L5 |
 | #4 adapter duration bounds, #7 queue overload (наблюдение high-water), #8 bounded steps, #10 high-water/CPU | as-needed (по классу) | L4 |
@@ -120,10 +120,10 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 | CAN flood | поток > 64 кадров/тик | drop + счётчик + событие; control-plane жив; T_fs не нарушен |
 | CAN физический слой | обрыв/КЗ/терминация | error counters, bus-off recovery, stop при error passive (HZ-03) |
 | Force-stop | bumper edge (в т.ч. в окне erase) | вне окна: min-ID кадр ≤ T_fs + latch + crash counter; в окне erase: эмиссия отложена до конца окна, обработка latch ≤ 4 s после окна (Q7.2), crash counter может недосчитать (принятый риск) |
-| Stuck I2C | SDA/SCL к GND при BMS-транзакции | recovery-механика работает (≤ 16 SCL, STOP, cooldown ≥ 5 s); своевременный Degraded (HZ-06) + Stop при влиянии на motion-сенсорику (INV-SENSING-FRESH); T_deg-отсчёт; после recovery - квалифицированный выход. Свежесть в окне stuck **не удерживается** (образцов нет) - это и есть условие перехода |
+| Stuck I2C | SDA/SCL к GND при BMS-транзакции | recovery-механика работает (≤ 16 SCL, STOP, cooldown ≥ 5 s); своевременный Degraded (HZ-06) + Stop при влиянии на motion-сенсорику (INV-SENSING-FRESH); T_deg-отсчёт; после recovery — квалифицированный выход. Свежесть в окне stuck **не удерживается** (образцов нет) — это и есть условие перехода |
 | Log storm | поток логов по bridge | ни один шаг > T_step; drop-newest + счётчик (неблокирующий TX) |
 | Power-cut | снятие питания в точке: save / staging / applying / mid-op / mid-GC s7 | валидный предыдущий снапшот; bootcount++; rollback; W_apply ≤ 1 s; HZ-14-путь |
-| Radio AUX-hang | удержание AUX | AUX-ожидание неблокирующее (split по bounded под-шагам, ни один шаг > T_step = 10 ms); mode-settle в бюджете тика; при hang - таймаут + backoff 5/30/120/600 + событие/счётчик |
+| Radio AUX-hang | удержание AUX | AUX-ожидание неблокирующее (split по bounded под-шагам, ни один шаг > T_step = 10 ms); mode-settle в бюджете тика; при hang — таймаут + backoff 5/30/120/600 + событие/счётчик |
 | Radio-трафик (as-needed) | telemetry-подписка активна + events-поток по radio | events-резерв не вытесняется telemetry (Q3-A radio-поверхность); snapshot-ответ ≤ 2 фрагмента; manual-сессия занимает radio-слот, tear-down на Closing (#49 #10) |
 | Watchdog starvation | отъём reload (тест-хук) | reset в аппаратном окне 6.8–18.8 s; boot-причина watchdog; crash-запись |
 | Lease loss | прекращение hold-to-run | T_lease_stop measured ≤ бюджет |
@@ -140,22 +140,22 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 
 Каждое измерение: observed maxima с workload metadata (какие прерывания, CAN-нагрузка, состояние движения), не WCET.
 
-**Reference instant и синхронизация часов.** Trigger-момент фиксируется корреляцией `monotonicTick` ↔ таймстамп анализатора: trigger-кадр по CAN + событийные метки с tick в envelope (#49 §2.1). Для C1-цепочки измеряются два уровня: полная цепочка «последний валидный образец → стоп-кадр» ≤ T_fresh + T_eso = 370 ms и «детекция staleness → стоп» ≤ T_eso = 70 ms (декомпозиция по событийным меткам). Для W_apply отсчёт - от подтверждённой quiescence (#50 §3.1): внешняя детекция фазы по событийным меткам Update-этапов. Power-cut-точки (save/staging/applying/mid-op/mid-GC) - по меткам фаз с monotonicTick.
+**Reference instant и синхронизация часов.** Trigger-момент фиксируется корреляцией `monotonicTick` ↔ таймстамп анализатора: trigger-кадр по CAN + событийные метки с tick в envelope (#49 §2.1). Для C1-цепочки измеряются два уровня: полная цепочка «последний валидный образец → стоп-кадр» ≤ T_fresh + T_eso = 370 ms и «детекция staleness → стоп» ≤ T_eso = 70 ms (декомпозиция по событийным меткам). Для W_apply отсчёт — от подтверждённой quiescence (#50 §3.1): внешняя детекция фазы по событийным меткам Update-этапов. Power-cut-точки (save/staging/applying/mid-op/mid-GC) — по меткам фаз с monotonicTick.
 
-**Протокол observed-maxima.** Минимальный объём кампании: ≥ 30 прогонов на сценарий (стартовый минимум; планировщик детерминированный - разброс дают нагрузочные паттерны, поэтому workload-матрица важнее N; калибруется по стабильности max на #54). Workload-матрица фиксируется (активные прерывания, CAN-нагрузка, состояние движения, занятые очереди). Правило решения: measured max за N прогонов + margin ≤ бюджет; margin - из #48 (C1a ≥ 100 ms; watchdog-практика k ≥ 1.5–2), иначе задокументированный запас ≥ 20% или явный отказ от запаса с обоснованием. Analytical-состав T_fs = T_isr + T_step + T_mailbox остаётся аргументом полноты путей (гибрид static+measurement, NICTA).
+**Протокол observed-maxima.** Минимальный объём кампании: ≥ 30 прогонов на сценарий (стартовый минимум; планировщик детерминированный — разброс дают нагрузочные паттерны, поэтому workload-матрица важнее N; калибруется по стабильности max на #54). Workload-матрица фиксируется (активные прерывания, CAN-нагрузка, состояние движения, занятые очереди). Правило решения: measured max за N прогонов + margin ≤ бюджет; margin — из #48 (C1a ≥ 100 ms; watchdog-практика k ≥ 1.5–2), иначе задокументированный запас ≥ 20% или явный отказ от запаса с обоснованием. Analytical-состав T_fs = T_isr + T_step + T_mailbox остаётся аргументом полноты путей (гибрид static+measurement, NICTA).
 
 ## 7. Acceptance evidence и manual approval (Q5)
 
 ### 7.1 Evidence records
 
-Каждый verification activity → evidence record: `{ID (V-<n>), тип (review/analysis/test/measurement/commissioning), refs (requirements/hazards/obligations), method, oracle, environment, результат, source/version/confidence, owner, дата}`. Автоматические прогоны - CI-артефакты (JUnit/JSON/logs), на которые records ссылаются. Паттерн #53/#55 (main-resident evidence assets с относительными ссылками; commit-pinning - только для внешних ассетов; исторические ссылки защищены тегами `evidence/*`) + формализация полей. Измерения - с workload metadata.
+Каждый verification activity → evidence record: `{ID (V-<n>), тип (review/analysis/test/measurement/commissioning), refs (requirements/hazards/obligations), method, oracle, environment, результат, source/version/confidence, owner, дата}`. Автоматические прогоны — CI-артефакты (JUnit/JSON/logs), на которые records ссылаются. Паттерн #53/#55 (main-resident evidence assets с относительными ссылками; commit-pinning - только для внешних ассетов; исторические ссылки защищены тегами `evidence/*`) + формализация полей. Измерения — с workload metadata.
 
 ### 7.2 Approval
 
 - **Automated checks** (green CI) = evidence, не approval;
-- **Independent review** - обязателен для Semantic-изменений (#8 §9) и для закрытия verification obligations (review evidence); независимость I1 (ISO 26262-6 confirmation measure);
-- **Owner approval** - release gate, residual risks (hazard acceptance, G2), waivers, non-blocking obligations (owner + deadline/stage + method + условие invalidation);
-- **Commissioning** (brake/force-stop тест Q7.1 A, INV-BRAKE-VALIDITY) - ручной per-device sign-off во внешнем журнале ТО; firmware предоставляет авторизованные примитивы и диагностику, регистрация - вне firmware; в CI не входит.
+- **Independent review** — обязателен для Semantic-изменений (#8 §9) и для закрытия verification obligations (review evidence); независимость I1 (ISO 26262-6 confirmation measure);
+- **Owner approval** — release gate, residual risks (hazard acceptance, G2), waivers, non-blocking obligations (owner + deadline/stage + method + условие invalidation);
+- **Commissioning** (brake/force-stop тест Q7.1 A, INV-BRAKE-VALIDITY) — ручной per-device sign-off во внешнем журнале ТО; firmware предоставляет авторизованные примитивы и диагностику, регистрация — вне firmware; в CI не входит.
 
 ### 7.3 Release evidence (к каждому релизу `v*`)
 
@@ -192,39 +192,39 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 
 Правила:
 
-- HIL-время: release gate + Semantic изменения safety-пути; ночные HIL-кампании - по накоплению/свободе стенда;
-- Flaky-тесты - quarantine (не gate-block), триаж bench-дефектов vs product-багов (практика OPAL-RT);
+- HIL-время: release gate + Semantic изменения safety-пути; ночные HIL-кампании — по накоплению/свободе стенда;
+- Flaky-тесты — quarantine (не gate-block), триаж bench-дефектов vs product-багов (практика OPAL-RT);
 - Назначение тестов по trace: каждый тест знает, какие модули/обязательства покрывает (для trace-based селекции и trace-матрицы).
 
 ## 9. Покрытие (coverage policy)
 
-- **Trace-матрица** (derived view, issue 8): 100% mapping requirement/hazard ↔ verification attributes (method/oracle/environment/evidence type) - обязательна на каждом gate;
-- **Host branch-coverage** (gcov на native) для safety-компонентов домена (Safety Authority, Sensing staleness, arbitration, lease, recovery FSM) - release evidence; стартовый порог 0%, целевой ≥ 90% на release, порог растёт по мере накопления тестов;
-- MC/DC и target-coverage - вне scope (internal profile, не сертификация; решение #51);
+- **Trace-матрица** (derived view, issue 8): 100% mapping requirement/hazard ↔ verification attributes (method/oracle/environment/evidence type) — обязательна на каждом gate;
+- **Host branch-coverage** (gcov на native) для safety-компонентов домена (Safety Authority, Sensing staleness, arbitration, lease, recovery FSM) — release evidence; стартовый порог 0%, целевой ≥ 90% на release, порог растёт по мере накопления тестов;
+- MC/DC и target-coverage — вне scope (internal profile, не сертификация; решение #51);
 - Property-тесты (O1) покрывают инварианты независимо от структурного покрытия.
 
 ## 10. Решения владельца (Q1–Q6 + SIL)
 
 | ID | Решение |
 | --- | --- |
-| Q1 | Геометрия: L1 docs/schema, L2 host unit/property, L3 host-интеграция с adapter fakes (без ISS и plant model), L4 bench (плата без механики), L5 HIL-стенд; полный шаттл - field implementation-карты |
+| Q1 | Геометрия: L1 docs/schema, L2 host unit/property, L3 host-интеграция с adapter fakes (без ISS и plant model), L4 bench (плата без механики), L5 HIL-стенд; полный шаттл — field implementation-карты |
 | Q2 | Oracle-модель O1–O4; RapidCheck для PBT; структурированный fuzz парсера (L2/L3); V1 не oracle |
 | Q3 | Obligations закрываются #54 одноразово (evidence); production-пирамида = обязательные acceptance (safety-тайминги HIL) + регрессия по необходимости |
 | Q4 | Полный стенд (CAN-инъектор, питание-реле, I2C-коммутатор, E22+аттенюатор); 6 обязательных acceptance (release gate) + as-needed сценарии |
-| Q5 | Evidence records {ID, тип, refs, method, oracle, environment, результат, source/version/confidence, owner}; automated ≠ review ≠ owner; commissioning - ручной внешний sign-off; release evidence - 7 пунктов |
+| Q5 | Evidence records {ID, тип, refs, method, oracle, environment, результат, source/version/confidence, owner}; automated ≠ review ≠ owner; commissioning — ручной внешний sign-off; release evidence — 7 пунктов |
 | Q6 | Три каденции (PR: host-слой; nightly: L4; release: L5 + as-needed) + селекция по классу изменения + правило HIL-времени |
 | SIL | Plant model (строгий SIL) отклонён: fidelity-потолок до полевых данных (#48 field), тайминги не покрывает, дублирует L3; L3 выполняет роль SIL-слоя через fakes |
 
 ## 11. Assumptions / Unknowns / Confidence
 
-- **Assumption:** host↔target эквивалентность домена держится на зеркальных build flags (#51 §4) и отсутствии UB (R7); расхождения - баги или toolchain-семантика (O3-триаж).
+- **Assumption:** host↔target эквивалентность домена держится на зеркальных build flags (#51 §4) и отсутствии UB (R7); расхождения — баги или toolchain-семантика (O3-триаж).
 - **Assumption:** стенд HIL доступен на implementation-карте; ночное L4-окно доступно.
 - **Assumption:** PBT-генераторы детерминированы (seed-политика при флейках); RapidCheck и googletest версии фиксируются при стендапе native env (#51 §3, §8).
-- **Assumption:** AUX 20 ms (#48 §5) - конфигурированное значение; соответствие T_step = 10 ms обеспечивается неблокирующим ожиданием (split по под-шагам, #43 §4 «никогда не блокировать»), проверяется сценарием AUX-hang (раздел 6.2).
-- **Assumption:** объём observed-maxima кампании (N ≥ 30) - стартовый, калибруется по стабильности max на #54; workload-матрица фиксируется по образцу #54 (synthetic loads issue 10).
-- **Unknown:** фактический объём trace-записи журнала (s11, лимиты 5/25) и подписочных caps - по опыту #54/#52 (карта #1, fog).
+- **Assumption:** AUX 20 ms (#48 §5) — конфигурированное значение; соответствие T_step = 10 ms обеспечивается неблокирующим ожиданием (split по под-шагам, #43 §4 «никогда не блокировать»), проверяется сценарием AUX-hang (раздел 6.2).
+- **Assumption:** объём observed-maxima кампании (N ≥ 30) — стартовый, калибруется по стабильности max на #54; workload-матрица фиксируется по образцу #54 (synthetic loads issue 10).
+- **Unknown:** фактический объём trace-записи журнала (s11, лимиты 5/25) и подписочных caps — по опыту #54/#52 (карта #1, fog).
 - **Unknown:** точные версии googletest framework при стендапе native env (фиксируются по факту, #51 §14).
-- **Confidence:** высокая для host-слоя (механизмы #51 проверены); целевые покрытия и пороги - стартовые, калибруются опытом; HIL-обязательства - на этапе спецификации (стенд материализуется на implementation-карте).
+- **Confidence:** высокая для host-слоя (механизмы #51 проверены); целевые покрытия и пороги — стартовые, калибруются опытом; HIL-обязательства — на этапе спецификации (стенд материализуется на implementation-карте).
 
 ## 12. Условия пересмотра
 
@@ -246,7 +246,7 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 | Golden V1 как oracle | Q2 | V1 не норматив (правило карты) |
 | Только requirement-based тесты без PBT | Q2 | слабее для инвариантов, случайные последовательности не покрыты |
 | Без fuzzing парсера | Q2 | ECUFuzz-класс дефектов остаётся на поле |
-| Полное закрытие obligations только #54 без регрессии | Q3 (владелец принял B - см. §5.3) | обязательные acceptance + as-needed сохранены |
+| Полное закрытие obligations только #54 без регрессии | Q3 (владелец принял B — см. §5.3) | обязательные acceptance + as-needed сохранены |
 | Вся регрессия на каждом PR (включая L4/L5) | Q6 | стендовое время нереалистично (практика: smoke на merge) |
 | Без nightly L4 | Q6 | bench-дефекты живут до релиза |
 | Минимальный стенд (без I2C/radio-инъекции) | Q4 | физика HZ-06/HZ-03 непроверена до поля |
@@ -257,6 +257,6 @@ D_brake(v, load, grade), v_max_phys (percent→м/с mapping привода), AT
 ## 14. Ссылки
 
 - Тикет «Спроектировать verification pyramid V3 (item 12)» (#52) и resolution-комментарии Q1–Q6.
-- #43 (§8 - 15 validation obligations), #48 (бюджеты, §11 - measurement plan), #45 (hazards/инварианты/verification), #49 (§13 - obligations наблюдаемости), #50 (§12 - контрактные тесты lifecycle), issue 10 (evidence-список proving slice), #51 (engineering baseline: host-тесты, static, CI, release), issue 8 (item 12, G5, evidence class, change classes), #53 (evidence assets).
+- #43 (§8 — 15 validation obligations), #48 (бюджеты, §11 — measurement plan), #45 (hazards/инварианты/verification), #49 (§13 — obligations наблюдаемости), #50 (§12 — контрактные тесты lifecycle), issue 10 (evidence-список proving slice), #51 (engineering baseline: host-тесты, static, CI, release), issue 8 (item 12, G5, evidence class, change classes), #53 (evidence assets).
 - `docs/quality-attributes-and-budgets-v3.md`, `docs/safety-model-v3.md`, `docs/observability-architecture-v3.md`, `docs/configuration-identity-lifecycle-v3.md`, `docs/engineering-and-release-baseline-v3.md`, `docs/software-architecture-boundaries-v3.md`, `docs/research/v3-capability-evidence-slices.md`.
 - Индустриальные источники: ISO 26262-6:2018 (unit/integration/embedded verification, back-to-back), IEC 61508-3:2010 (V-model, verification), ISO 13849-2 (валидация с fault-injection), NASA SWEHB 9.12/9.14 (margins, resource measurement), практика HIL-регрессии (OPAL-RT), trace-based test selection (ICST'16), MIL/SIL/PIL/HIL (MathWorks), ECUFuzz (ISSTA 2025), confirmation measures ISO 26262.
