@@ -1,6 +1,6 @@
 # Baseline Manifest V3 (gate G6)
 
-Статус: **In Review - profile qualification rebaseline items 2/6/7/8/11/12/13; финальный статус после независимого review, owner approval и закрытия [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59)**. Исторический gate G6 закрыт тикетом [#56](https://github.com/Driadix/ShuttleControllerV3/issues/56) для предыдущих revisions. Класс: Derived View (issue 8 §2: manifest и traceability/status/coverage матрицы; проверяются на полноту и консистентность, не получают повторного смыслового approval). Единая точка входа нормативного пакета V3.
+Статус: **Approved - profile qualification rebaseline items 2/6/7/8/11/12/13; финальная ревизия `7491869` (status finalization, PR #79), семантическое evidence `9b431a7` (PR #78); тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрывается после merge настоящего manifest PR**. Исторический gate G6 закрыт тикетом [#56](https://github.com/Driadix/ShuttleControllerV3/issues/56) для предыдущих revisions. Класс: Derived View (issue 8 §2: manifest и traceability/status/coverage матрицы; проверяются на полноту и консистентность, не получают повторного смыслового approval). Единая точка входа нормативного пакета V3.
 
 Правила: изменение любого включённого item revision - по change control (#8 §9, классы Editoral/Clarifying/Semantic/Baseline-affecting); manifest сам по себе не дублирует нормативное содержание (только ревизии, статусы, gates, approval records).
 
@@ -9,31 +9,31 @@
 | # | Logical item | Документ-носитель | Ревизия (commit, main) | Тикет | Gate | Статус | Approval |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Project Assurance & Governance | issue 8 resolution + `docs/agents/*.md` (tracker/triage/hitl/domain conventions) | issue 8 (immutable resolution) | #8, #7 | G0 | Approved | владелец |
-| 2 | System Context & Concepts | `CONTEXT.md` + issue 2 resolution | pending rebaseline revision | #2, #59 | G0 | In Review (profile terminology rebaseline) | pending review/closure #59 |
+| 2 | System Context & Concepts | `CONTEXT.md` + issue 2 resolution | `9b431a7` (семантика; status-изменений нет) | #2, #59 | G0 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78) |
 | 3 | Stakeholder & System Requirements | распределены: `docs/semantic-contract-v3.md`, `docs/quality-attributes-and-budgets-v3.md`, per-operation docs | см. items 4/6/9 | #2, #9, #13 | G1 | Approved (распределённый) | владелец |
 | 4 | Capability & Operation Contracts | `docs/semantic-contract-v3.md` + 14 algorithmic docs (#16, #30-42) | `1cd2f1b`; algorithmic docs `7873943` (группа) | #13, #16, #30-42, #9, #14 | G1 | Approved | владелец |
 | 5 | Safety & Health | `docs/safety-model-v3.md` | `1b08bb8` | #45 | G2 | Approved | владелец |
-| 6 | External Semantic & Transport Contracts | `docs/external-semantic-transport-contracts-v3.md` | pending rebaseline revision | #47, #59 | G3 | In Review (profile qualification rebaseline) | pending review/closure #59 |
-| 7 | Configuration, Identity & Lifecycle | `docs/configuration-identity-lifecycle-v3.md` + `docs/lifecycle-axes-v3.md` | pending rebaseline revisions | #50, #46, #59 | G2/G3 | In Review (profile qualification rebaseline) | pending review/closure #59 |
-| 8 | Observability & Diagnostics | `docs/observability-architecture-v3.md` | pending rebaseline revision | #49, #59 | G3 | In Review (shuttle-profile snapshot rebaseline) | pending review/closure #59 |
+| 6 | External Semantic & Transport Contracts | `docs/external-semantic-transport-contracts-v3.md` | `7491869` | #47, #59 | G3 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78), статус `7491869` (PR #79) |
+| 7 | Configuration, Identity & Lifecycle | `docs/configuration-identity-lifecycle-v3.md` + `docs/lifecycle-axes-v3.md` | `7491869` | #50, #46, #59 | G2/G3 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78), статус `7491869` (PR #79) |
+| 8 | Observability & Diagnostics | `docs/observability-architecture-v3.md` | `7491869` | #49, #59 | G3 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78), статус `7491869` (PR #79) |
 | 9 | Quality Attributes & Budgets | `docs/quality-attributes-and-budgets-v3.md` | `1b08bb8` | #48 | G4 | Approved | владелец |
 | 10 | Software Architecture | `docs/software-architecture-boundaries-v3.md` + issue 10 (execution) + `docs/proving-slice-v3.md` | `1b08bb8`; issue 10 resolution; `9c045f1` | #43, #10, #54 | G4 | Approved (execution conditional, host-only evidence) | владелец |
-| 11 | Engineering & Release | `docs/engineering-and-release-baseline-v3.md` | pending rebaseline revision | #51, #59 | G5 | In Review (profile qualification evidence carrier) | pending review/closure #59 |
-| 12 | Verification Strategy & Acceptance | `docs/verification-strategy-v3.md` | pending rebaseline revision | #52, #59 | G5 | In Review (profile qualification rebaseline) | pending review/closure #59 |
-| 13 | Implementation Plan | `docs/implementation-plan-v3.md` | pending rebaseline revision | #57, #59 | G6 | In Review (profile qualification rebaseline) | pending review/closure #59 |
+| 11 | Engineering & Release | `docs/engineering-and-release-baseline-v3.md` | `7491869` | #51, #59 | G5 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78), статус `7491869` (PR #79) |
+| 12 | Verification Strategy & Acceptance | `docs/verification-strategy-v3.md` | `7491869` | #52, #59 | G5 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78), статус `7491869` (PR #79) |
+| 13 | Implementation Plan | `docs/implementation-plan-v3.md` | `7491869` | #57, #59 | G6 | Approved (profile qualification rebaseline) | независимый review + владелец, семантика `9b431a7` (PR #78), статус `7491869` (PR #79) |
 
 Evidence assets (класс Evidence, #8 §2): `docs/research/v1-system-evidence-index.md` (тег `evidence/v1-system-evidence-index`), `docs/research/v1-execution-evidence.md` (`evidence/v1-execution-evidence`), `docs/research/v3-capability-evidence-slices.md` (`evidence/v3-capability-evidence-slices`), `docs/research/proving-slice-report.md` (host-only, #54), `docs/proving-slice-v3.md` (design, #54).
 
-Profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): единый binary сохраняет supported profiles 800/1000/1200; production qualification принадлежит конкретному signed app image; `v1.0.0` получает singleton qualification target на gate Фазы 3; glossary/wire/lifecycle/observability/release/verification/implementation items изменены согласованно.
+Profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): единый binary сохраняет supported profiles 800/1000/1200; production qualification принадлежит конкретному signed app image; `v1.0.0` получает singleton qualification target на gate Фазы 3; glossary/wire/lifecycle/observability/release/verification/implementation items изменены согласованно. Утверждено независимым embedded/RT review (APPROVE, 0 findings) и владельцем: семантика `9b431a7` (PR #78, merge `6bf7b14`), статус `7491869` (PR #79, merge `80b0759`).
 
 ## 2. Status matrix (по классам #8 §2)
 
 | Класс | Покрытие | Статус |
 | --- | --- | --- |
-| Normative (13 items) | items 2, 6, 7, 8, 11, 12 и 13 изменены profile qualification rebaseline | In Review до независимого review и закрытия [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); остальные items Approved |
+| Normative (13 items) | items 2, 6, 7, 8, 11, 12 и 13 утверждены profile qualification rebaseline | Approved (13/13): семантика `9b431a7` (PR #78), статус `7491869` (PR #79); независимый review + владелец; #59 закрывается после merge manifest PR |
 | Evidence | V1-индексы, capability slices, proving slice отчёт | verified (independent review) |
 | Governance | issue 8, triage/hitl/domain conventions, change classes | Approved |
-| Derived Views | настоящий manifest + матрицы §3-4 | In Review вместе с profile qualification rebaseline |
+| Derived Views | настоящий manifest + матрицы §3-4 | Approved (manifest фиксирует финальные revision и approval records) |
 
 ## 3. Trace matrix: hazards → verification (полная таблица - `docs/verification-strategy-v3.md` §4)
 
@@ -74,13 +74,13 @@ Profile qualification rebaseline [«Переутвердить профильн�
 
 ## 5. G6 closure (issue 8 §6)
 
-- [ ] Baseline Manifest фиксирует main revisions и approval 13 items - profile qualification revisions items 2, 6, 7, 8, 11, 12 и 13 pending до merge/закрытия #59.
+- [x] Baseline Manifest фиксирует main revisions и approval 13 items - profile qualification revisions items 2, 6, 7, 8, 11, 12 и 13: семантика `9b431a7` (PR #78), статус `7491869` (PR #79).
 - [x] Derived views: trace (hazard → verification → модуль), status (item/class), coverage (obligations → модули).
 - [x] Orphan/uncovered: каждый obligation имеет модуль и статус; каждый модуль имеет acceptance (§3 implementation-plan).
 - [x] Schema-чеки: markdownlint-clean, относительные ссылки, без TBD.
-- [ ] Блокирующие решения: profile qualification rebaseline открыт в [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59).
-- [ ] Independent review profile qualification rebaseline: pending; исходные review #56/#57 сохраняют историческую силу только для предыдущих revisions.
-- [ ] Owner approval profile qualification rebaseline: pending closure #59; исходный gate G6 approval #56 относится к предыдущим revisions.
+- [x] Блокирующие решения: profile qualification rebaseline принят владельцем и независимым review (PR #78), тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрывается.
+- [x] Independent review profile qualification rebaseline: APPROVE на `9b431a7` (0 BLOCKING, 0 MAJOR, 0 MINOR, 0 NIT); цепочка ревью #56/#57/4 раунда rebaseline зафиксирована в тикете #59.
+- [x] Owner approval profile qualification rebaseline: утверждён на `9b431a7` (тикет #59, PR #78).
 
 ## 6. Ссылки
 
