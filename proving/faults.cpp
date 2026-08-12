@@ -10,6 +10,9 @@
 #ifdef V3_KERNEL_HYBRID
 #include "platform/execution_hybrid.h"
 #endif
+#ifdef V3_KERNEL_RTOS
+#include "platform/execution_rtos.h"
+#endif
 
 namespace slice
 {
@@ -20,9 +23,15 @@ namespace faults
 
 void bumper_edge(HarnessState& state)
 {
-#ifdef V3_KERNEL_HYBRID
-    // Preemptible channel: the hybrid kernel latches the request; the serve
-    // path (on_tick) invokes the registered CAN emitter (obligation #3/#13).
+#ifdef V3_KERNEL_RTOS
+    // RTOS: latch into the funnel + notify the highest-priority safety task
+    // (deferred to task context with preemption by priority - the RTOS
+    // semantics of the force-stop chain, obligation #3/#13).
+    state.bumper_pending = true;
+    kernel::rtos::bumper_notify_from_isr();
+#elif defined(V3_KERNEL_HYBRID)
+    // Preemptible channel: the hybrid kernel emits synchronously from ISR
+    // context (obligation #3/#13).
     kernel::force_stop_isr();
 #else
     // Cooperative: the bumper event is latched and applied to the funnel by

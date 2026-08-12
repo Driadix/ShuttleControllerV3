@@ -55,19 +55,18 @@ void on_tick()
     ++g_cycle.seq; // even: consistent
 }
 
-// Read-twice-and-compare with bounded retry: the ISR is the only writer, so a
-// torn interleave is detected by mismatched reads and retried (single-word
-// writes are atomic on Cortex-M4).
+// Atomic 64-bit read via a brief PRIMASK critical section: the only writers
+// are ISRs (TIM2 tick increment, bumper edge), all short. Read-twice-and-
+// compare is NOT sufficient - an ISR write can land at the same half-word
+// boundary on both reads, yielding a consistently torn value (review B1/M4
+// follow-up). Disabling interrupts around the read is bounded and correct.
 std::uint64_t read64(const volatile std::uint64_t& v)
 {
-    std::uint64_t a = v;
-    std::uint64_t b = v;
-    while (a != b)
-    {
-        a = v;
-        b = v;
-    }
-    return a;
+    const std::uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const std::uint64_t val = v;
+    __set_PRIMASK(primask);
+    return val;
 }
 
 } // namespace
