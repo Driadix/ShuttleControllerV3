@@ -1,6 +1,6 @@
 # Implementation Plan V3 (item 13, gate G6)
 
-Статус: **In Review - profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision Approved при закрытии [#57](https://github.com/Driadix/ShuttleControllerV3/issues/57), gate G6**. Переутверждение фиксируется при закрытии #59 (issue 8 §7: Draft → In Review → Approved). Вход в logical item `Implementation Plan` нормативного пакета (issue 8, item 13, gate G6). Класс: Normative (issue 8 §2). Этот документ фиксирует трассируемую декомпозицию реализации, зависимости, acceptance gates и rollout order. Реализационный дизайн железо-завязанных модулей (движение, CAN, I2C, алгоритмы) - территория implementation-карты с evidence с реального шаттла (правило карты, Notes).
+Статус: **Approved - profile qualification rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): независимый embedded/RT review APPROVE (0 findings) и owner approval на ревизии `9b431a7` (PR #78)**. Предыдущая revision Approved при закрытии [#57](https://github.com/Driadix/ShuttleControllerV3/issues/57), gate G6. Вход в logical item `Implementation Plan` нормативного пакета (issue 8, item 13, gate G6). Класс: Normative (issue 8 §2). Этот документ фиксирует трассируемую декомпозицию реализации, зависимости, acceptance gates и rollout order. Реализационный дизайн железо-завязанных модулей (движение, CAN, I2C, алгоритмы) - территория implementation-карты с evidence с реального шаттла (правило карты, Notes).
 
 Термины - канонические из `CONTEXT.md`.
 
@@ -123,7 +123,7 @@
 - [x] Трассировка obligations/бюджетов/verification → модули полна (§4, включая #49 §13 и #50 §12).
 - [x] Derived views (trace/status/coverage) - тикет #56 (Baseline Manifest).
 - [x] Pre-rebaseline revision: independent review проведен при закрытии тикета #57 (2 MAJOR + 4 MINOR + 2 NIT учтены).
-- [ ] Profile qualification rebaseline: independent review final revision и owner approval фиксируются при закрытии [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59).
+- [x] Profile qualification rebaseline: независимый embedded/RT review APPROVE (0 findings) и owner approval на ревизии `9b431a7` (PR #78), тикет [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59) закрыт.
 
 ## 8. Ссылки
 

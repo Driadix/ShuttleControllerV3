@@ -1,6 +1,6 @@
 # Архитектура наблюдаемости V3 (Observability Architecture)
 
-Статус: **In Review - shuttle-profile snapshot rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59); предыдущая revision утверждена владельцем и независимо reviewed в тикете [«Спроектировать архитектуру наблюдаемости V3»](https://github.com/Driadix/ShuttleControllerV3/issues/49)**. Вход в logical item 8 (`Observability & Diagnostics`) нормативного пакета (issue 8, gate G4) и в architecture proving slice (тикет #54).
+Статус: **Approved - shuttle-profile snapshot rebaseline [«Переутвердить профильный scope релиза v1.0.0»](https://github.com/Driadix/ShuttleControllerV3/issues/59): независимый embedded/RT review APPROVE (0 findings) и owner approval на ревизии `9b431a7` (PR #78)**. Предыдущая revision утверждена владельцем и независимо reviewed в тикете [«Спроектировать архитектуру наблюдаемости V3»](https://github.com/Driadix/ShuttleControllerV3/issues/49). Вход в logical item 8 (`Observability & Diagnostics`) нормативного пакета (issue 8, gate G4) и в architecture proving slice (тикет #54).
 
 Термины — канонические из `CONTEXT.md`: Подписка, Транспортный профиль, Controller Epoch, Outcome операции, Платформенное окно. Исполнение — cooperative scheduler с bounded run-to-completion steps (issue 10), ports-and-adapters (#43), lifecycle-оси (#46), численные бюджеты — `docs/quality-attributes-and-budgets-v3.md` (#48).
 
