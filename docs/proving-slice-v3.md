@@ -75,10 +75,11 @@
 
 ### 3.3 Static RTOS
 
-- Кандидат - FreeRTOS (решение по research RtosVariant, §13.1): де-факто индустриальный стандарт для статических RTOS (Amazon, огромная экосистема верификации); ststm32@17.4.0 НЕ бандлит FreeRTOS-фреймворк, но STM32duino core 2.7.1 готов к нему: `premain()` ставит `NVIC_PRIORITYGROUP_4` «Required by FreeRTOS», `SrcWrapper/clock.c` имеет weak-хук `osSystickHandler()` для SysTick-тика RTOS (факт, research 2026-08-12).
-- Пакет и точный пин - **HITL-решение** (§13.1, briefing владельцу): официальный FreeRTOS-Kernel в PlatformIO-реестре отсутствует; in-registry кандидаты: `mincrmatt12/STM32Cube Middleware-FreeRTOS@10.3.1+f4-1.26.1` (ST-патченное ядро для F4-HAL, максимум индустриального соответствия) vs `linlin-study/FreeRTOS-Kernel@10.4.4-1` (plain kernel). Вне-registry (git-пин) запрещён политикой #51 §5.4.
-- Конфигурация: статические задачи (safety / control+sensing / transport / observability), `configSUPPORT_DYNAMIC_ALLOCATION=0`, bounded IPC через статические очереди, SysTick-тик через `osSystickHandler()`, ISR nesting по NVIC 4-бит группе.
-- Host-нога: официального host-порта FreeRTOS для этой конфигурации нет в реестре; host-лега RTOS-variant покрывает kernel-независимую логику (арбитраж, health, очереди), а исполнение - target. Это фиксируется в отчёте как ограничение сравнения.
+- **Реализован** (коммит `d6fdeca`): FreeRTOS через пинированный ST Cube middleware `mincrmatt12/STM32Cube Middleware-FreeRTOS@10.3.1+f4-1.26.1` (решение владельца 2026-08-12). `FreeRTOSConfig.h`: static-only (`configSUPPORT_DYNAMIC_ALLOCATION=0`, все задачи/очереди статические), preemptive 1 kHz, тик через weak-хук core `osSystickHandler()` → `xPortSysTickHandler()` (коллизий нет: порт не определяет SysTick_Handler).
+- 4 задачи slice (safety 5 / sensing 4 / actuator 2 / observability 1) + kernel control task (drain bounded work queue из `schedule()`); watchdog reload на границах шагов задач + idle hook (НЕ в tick hook — иначе F5 starvation маскируется).
+- Force-stop семантика: bumper ISR → `xTaskNotifyFromISR` → safety task (преемпшн по приоритету) → funnel ForceStop intent → actuator task эмитит min-ID кадр. Отличается от hybrid (эмиссия из ISR-контекста) — сравнение фиксирует эту разницу (T_fs: ISR-emission vs task-deferral).
+- Сборка: `firmware-rtos` SUCCESS (RAM 7.1%: ядро + 4 задачи); `lib_compat_mode=off` (пакет декларирует `frameworks: stm32cube`), include-пути либы явные (add_config.py не пробрасывает их в project-src).
+- Host-нога: официального host-порта нет — host-лега RTOS-variant покрывает kernel-независимую логику (арбитраж, health, очереди — те же тесты), исполнение - target. Фиксируется в отчёте как ограничение сравнения.
 
 ## 4. Synthetic loads (обязательные, issue 10)
 
