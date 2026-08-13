@@ -1,6 +1,8 @@
 # PlatformIO
 .pio/
 .venv-pio/
+__pycache__/
+.venv-pio312/
 firmware.map
 
 # Editors
