@@ -13,7 +13,7 @@ production paths.
 
 Does this operator flow feel right?
 
-```
+```text
 detect (board + port)
   -> owner safety-checklist (physical, per run)
   -> flash (ST-Link, when scenario requires)

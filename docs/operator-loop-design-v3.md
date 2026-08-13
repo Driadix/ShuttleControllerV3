@@ -164,7 +164,7 @@ scope #65). `flash-verify` допускает `minFrames: 0`: его PASS утв
 
 ### 2.4 Evidence bundle (артефакты прогона)
 
-```
+```text
 out/<scenario>-<timestamp>/
   raw-<scenario>.bin       # сырой UART-захват (первичный артефакт)
   result-<scenario>.json   # нормализованный результат + identity + verdict
@@ -177,7 +177,7 @@ out/<scenario>-<timestamp>/
 
 ### 3.1 Операторный цикл (жёсткие gate'ы)
 
-```
+```text
 run <scenario>:
   # 0. Checklist владельца — ПЕРВЫЙ gate (если scenario.flash.required):
   #    никакое физическое взаимодействие (probe включительно) не исполняется
@@ -227,7 +227,7 @@ halt, без мутаций), вне прогонов gate'ом не обязы�
 
 ### 3.3 Oracle
 
-```
+```text
 frames = framesValid + framesBad
 if frames < minFrames:                        -> TIMEOUT
 if frames > 0 and framesBad/frames > maxCrcBadRatio:   -> FAIL
@@ -288,7 +288,7 @@ Enforcement: runner — bench tooling в `bench/`, не входит в domain i
 
 Программа в `bench/verification-runner/` (bench tooling; рядом с `bench/bridge-relay/` — конвенция карты):
 
-```
+```text
 bench/verification-runner/
   runner.py            # CLI: detect / checklist / flash / run / normalize / evidence
   scenarios/           # versioned scenario JSON (v1: uart-probe, flash-boot-smoke, ...)
@@ -301,7 +301,7 @@ bench/verification-runner/
 
 Public API (CLI):
 
-```
+```text
 verification-runner detect [--port COM9]             # board + uart identity
 verification-runner checklist --owner NAME [--out FILE]   # sign-off (HITL)
 verification-runner run <scenario.json> [--port P] [--checklist F] [--out-dir D]
@@ -313,7 +313,7 @@ verification-runner evidence <result.json>           # проверка полн
 
 ## 6. Light-визуализации
 
-```
+```text
 run(scenario):
     gates = [(checklist if flash), probe_board, check_port]   # порядок §3.1:
                                                               # checklist ПЕРВЫМ
