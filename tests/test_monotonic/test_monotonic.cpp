@@ -30,7 +30,9 @@ TEST(MonotonicTest, WrapSafe64Bit)
 }
 
 // T9: backward jump (NTP-style correction) must not break monotonicity:
-// process_tick clamps the gap to zero instead of fabricating a ~2^64 maximum.
+// process_tick clamps the gap to zero instead of fabricating a ~2^64
+// maximum, and a recovery forward jump does not fabricate a gap across the
+// correction (100 -> 50 -> 101 is 1 ms of real progress, not 51 ms).
 TEST(MonotonicTest, BackwardJumpClamped)
 {
     testfakes::KernelEnv env;
@@ -44,6 +46,13 @@ TEST(MonotonicTest, BackwardJumpClamped)
     v3::kernel::process_tick();
     // Clamped: the backward jump is zero gap - no second scheduler_gap event,
     // no fabricated ~2^64 gap.
+    EXPECT_EQ(env.events.gap_count(), 1u);
+    EXPECT_EQ(env.events.overrun_count(), 0u);
+
+    env.time.set_time_ms(101); // recovery forward jump past the pre-jump mark
+    v3::kernel::process_tick();
+    // NTP-immunity (issue #48 section 9): the high-water mark was preserved
+    // through the correction, so this tick measures 1 ms, not a 51 ms gap.
     EXPECT_EQ(env.events.gap_count(), 1u);
     EXPECT_EQ(env.events.overrun_count(), 0u);
 }

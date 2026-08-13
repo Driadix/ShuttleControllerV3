@@ -51,13 +51,22 @@ void process_tick()
     }
     const std::uint64_t now = monotonic::now_ms();
     // Clamp backward time jumps (NTP-style corrections, issue #48 section 9):
-    // a backward jump is zero gap, never a fabricated ~2^64 maximum.
-    const std::uint64_t gap = now >= g_last_tick_ms ? now - g_last_tick_ms : 0;
+    // a backward jump is zero gap, never a fabricated ~2^64 maximum. Keep the
+    // high-water mark when the clock goes backward: a recovery forward jump
+    // (100 -> 50 -> 101) measures real progress from the pre-jump mark
+    // (1 ms), not a fabricated 51 ms gap. Modular forward delta (same idiom
+    // as schedule(), wrap-safe at 2^64: T8 covers the clock wrap).
+    const std::int64_t fwd =
+        static_cast<std::int64_t>(now - g_last_tick_ms);
+    const std::uint64_t gap = fwd > 0 ? static_cast<std::uint64_t>(fwd) : 0u;
     if (gap > 3 * StepBudgetMs)
     {
         g_events->scheduler_gap(gap); // entry delayed > 3xT_step (30 ms)
     }
-    g_last_tick_ms = now;
+    if (fwd > 0)
+    {
+        g_last_tick_ms = now; // advance high-water mark only forward
+    }
 
     // Dispatch contract (design section 2.1): at most ONE due FIFO step per
     // tick. A full 64-step backlog drains at <= 1 step/tick (bounded).
