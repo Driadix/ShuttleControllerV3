@@ -4,7 +4,7 @@
 
 Этот документ задаёт контракт production runner'а **без реализации product behavior**: runner исполняет operator loop (обнаружение платы/порта → flash → сценарий → raw output → нормализация → evidence), а не бизнес-логику прошивки. Форматы scenario/result, evidence-контракт и split владелец/агент наследуют проверенный прототип и фиксируют production-форму для #65.
 
-Дизайн наследует утверждённые решения и **не пересматривает** их: #52 (verification pyramid, §6.3 L4-сценарии, §7.1 evidence records), #73/`docs/l4-sensor-bench-v3.md` (стенд: ControllerV6, ST-Link V2, COM9 relay-дисплей / COM29 Prolific, frozen toolchain), #51 (engineering baseline: структура репо, dependency rules, evidence/provenance), #43/#48 (measurement obligations, бюджеты), #70 (host-часть merged; T16 L4 smoke ждёт runner). Термины — канонические из `CONTEXT.md`.
+Дизайн наследует утверждённые решения и **не пересматривает** их: #52 (verification pyramid; §6.3 — обязательные L5 acceptance (release gate); §7.1 evidence records; L4 bench-сценарии §2/§8), #73/`docs/l4-sensor-bench-v3.md` (стенд: ControllerV6, ST-Link V2, COM9 relay-дисплей / COM29 Prolific, frozen toolchain), #51 (engineering baseline: структура репо, dependency rules, evidence/provenance), #43/#48 (measurement obligations, бюджеты), #70 (host-часть merged; T16 L4 smoke ждёт runner). Термины — канонические из `CONTEXT.md`.
 
 ## 0. Решения владельца (приняты 2026-08-13, HITL-брифинг тикета #60)
 
@@ -108,6 +108,9 @@ schema-валидацией (runner не имеет веток, превраща
 scope #65). `flash-verify` допускает `minFrames: 0`: его PASS утверждает
 только «flash выполнен + плата жива по probe + evidence полон» и явно НЕ
 утверждает поведение прошивки (Phase-1 kernel молчит на UART — §10).
+`flash-verify` обязан иметь `minFrames == 0` и пустые
+`requirePatterns`/`forbidPatterns`; иначе — schema error (exit 4), прогон не
+начинается (никакое утверждение поведения в flash-verify недопустимо).
 
 Расширение (L5/CAN, #62): секция `measurement` (источники измерений, бюджеты, workload metadata) добавляется аддитивно, schemaVersion 2; обязательные acceptance #52 §6.3 (C1/T_fs/lease/watchdog/power-cut/CAN flood) выражаются как L5-сценарии с measurement-секцией, а не как UART-только.
 
@@ -227,11 +230,16 @@ halt, без мутаций), вне прогонов gate'ом не обязы�
 ```
 frames = framesValid + framesBad
 if frames < minFrames:                        -> TIMEOUT
-if framesBad/frames > maxCrcBadRatio:         -> FAIL
+if frames > 0 and framesBad/frames > maxCrcBadRatio:   -> FAIL
 if any(forbidPatterns in logLines):           -> FAIL
 if not all(requirePatterns in logLines):      -> TIMEOUT
 -> PASS
 ```
+
+`frames == 0` (типично для flash-verify на silent kernel): ratio не
+вычисляется (guard `frames > 0`, как в прототипе `ratio = bad/total if total
+else 0.0`) — без guard деление на ноль: ZeroDivisionError в Python, NaN в C
+(всегда false, случайный PASS).
 
 Правило невакуумности (schema-валидация, §2.1): `behavior`-сценарий с
 `minFrames == 0` и пустыми `requirePatterns` — ошибка схемы, прогон не
@@ -313,11 +321,15 @@ run(scenario):
     if scenario.flash and not missing: flash()          # hard gate
     elif scenario.flash: record_skip(missing)           # INCOMPLETE path
     bind_identity(firmware, toolchain)                  # sha + artifact
-    raw = capture(scenario.capture)                     # bounded window
-    norm = normalize(raw)
+    if not missing:                                     # refusal: no capture
+        raw = capture(scenario.capture)                 # bounded window
+        norm = normalize(raw)
     verdict = INCOMPLETE if missing else oracle(norm)
     write_bundle(scenario, raw, norm, verdict)
 ```
+
+Refusal-путь (§3.1, §4.2.2): при непустом `missing` probe/flash/capture не
+исполняются; `raw`/`norm` отсутствуют, verdict = INCOMPLETE.
 
 ## 7. Тесты с call graph
 
@@ -365,7 +377,7 @@ flowchart LR
 | T11 vacuous oracle | behavior: minFrames=0 + пустые patterns | schema error (exit 4), прогон не начинается |
 | T12 flash-verify | minFrames=0 + flash ok + probe alive | PASS без утверждения поведения |
 
-Property-описание: (i) oracle-решения монотонны по `frames` для pattern-free oracles (без `forbidPatterns`/`requirePatterns`): больше принятых кадров при том же `maxCrcBadRatio` не ухудшает вердикт; с паттернами монотонность не гарантируется (валидный кадр с forbidden-строкой ухудшает). (ii) полнота детерминирована при фиксированном порядке gate'ов §3.1: для одного и того же прогона missing-множество воспроизводимо; порядок gate'ов (checklist → probe → port) фиксирован и не переупорядочивается.
+Property-описание: (i) для pattern-free oracles (без `forbidPatterns`/`requirePatterns`) вердикт не ухудшается при большем числе кадров **при той же доле битых** (добавление битых кадров меняет долю и может перевернуть PASS→FAIL по `maxCrcBadRatio` — это не нарушение монотонности, а смена входных данных); с паттернами монотонность не гарантируется (валидный кадр с forbidden-строкой ухудшает). (ii) полнота детерминирована при фиксированном порядке gate'ов §3.1: для одного и того же прогона missing-множество воспроизводимо; порядок gate'ов (checklist → probe → port) фиксирован и не переупорядочивается.
 
 ## 8. Vertical slice граница (#65)
 
