@@ -83,6 +83,10 @@ enum class ScheduleResult : std::uint8_t {
 //      поэтому блокировка головы ограничена одним тиком (≤ T_step).
 //   4. DeadlineOutOfWindow отклоняется на schedule: тихого успеха с невалидным дедлайном нет.
 //
+// Wrap-safe сравнение дедлайна (INV-MONOTONIC): поле uint32 хранит absolute-метку,
+// сравнение модулярное: static_cast<int32_t>(now_u32 - deadline_ms) < 0 => not due.
+// Корректно, пока окно дедлайна ≤ 2^31 ms (у нас ≤ T_step); 64-bit поле не нужно (RAM-бюджет #10).
+//
 // Dispatch contract (production hardening, отличие от slice):
 //   Slice выполнял ВСЕ due-шаги за один проход (до 64 × 10 ms = 640 ms) и reload
 //   только после прохода - это нарушало «reload на каждой границе шага» и
@@ -92,9 +96,16 @@ enum class ScheduleResult : std::uint8_t {
 //   combined load #8: сумма CPU-cost шагов тика ≤ T_step - выполняется тривиально).
 class StepRing {
   public:
-    // Выполняет не более одного due-шага. true = шаг выполнен. reload - обязанность вызывающего
+    struct StepRunResult {
+        bool executed = false;
+        std::uint32_t step_ms = 0;    // измеренная длительность шага (ms); 0, если не executed
+    };
+
+    // Выполняет не более одного due-шага. reload - обязанность вызывающего
     // (process_tick reload-ит сразу после каждого шага, INV-WATCHDOG-ARMED).
-    bool run_next(std::uint64_t now);
+    // Эмиссию событий и report_overrun выполняет kernel (владелец портов), не ring:
+    // ring - чистый контейнер без зависимостей от domain/ports.h (R6).
+    StepRunResult run_next(std::uint64_t now);
     ScheduleResult schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms, std::uint64_t now);
     bool empty() const;
     std::uint32_t count() const;
@@ -130,6 +141,8 @@ namespace v3::watchdog {
     void init(WatchdogPort& hw);          // IWDG 10 s конфигурация (адаптер)
     void reload();                        // вызывается только execution core, только из foreground (INV-WATCHDOG-ARMED)
     void note_flash_window();             // между последовательными flash-операциями (#48 §3)
+    void report_overrun(std::uint32_t step_ms);  // шаг > T_step: F5 starvation-моделирование
+                                                 // (эволюция slice watchdog::report_overrun)
 }
 ```
 
@@ -142,7 +155,7 @@ namespace v3::watchdog {
 // domain/ports.h - исходящий порт ядра (foreground-only вызовы)
 struct KernelEvents {
     virtual void step_overrun(std::uint32_t step_ms) = 0;   // шаг > T_step (obs #8)
-    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // gap > T_step (пропуск тика / flash-окно)
+    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // потеря ≥ 2 тиков (gap > 2×T_step); flash-окно НЕ через gap (§3.1)
     virtual void schedule_rejected() = 0;                   // очередь шагов полна (obs #7)
     virtual void reset_cause(ResetCause cause) = 0;         // стартап: crash-запись через reboot (#49 §13)
 };
@@ -161,16 +174,21 @@ main loop (run, никогда не возвращается):
     # target: WFI; wake на любой ISR (TIM2 продвинул clock) и re-check
     wait until now() > last_processed
     last_processed = now()
-    process_tick(last_processed)
+    process_tick()
 
-process_tick(now):                     # foreground-only; НЕ ISR; максимум один шаг за тик
-  gap = now - last_tick
-  if gap > T_step: events->scheduler_gap(gap)   # flash-окно / пропуск тика
+process_tick():                      # foreground-only; НЕ ISR; максимум один шаг за тик
+  now = time->now_ms()
+  gap = now - last_tick              # в терминах продвижения тика, см. ниже
+  if gap > 2 * T_step: events->scheduler_gap(gap)   # потеря ≥ 2 тиков подряд
+  last_tick = now
   if not ring.empty():
-    ring.run_next(now)                           # не более ОДНОГО due-шага (dispatch contract §2.1);
-                                                 # blocked head (не-due) - ничего не выполняется (≤ T_step)
-  watchdog.reload()                              # безусловно на каждом тике: покрывает границу шага,
-                                                 # idle и blocked head (INV-WATCHDOG-ARMED, #43 §4, #48 §3)
+    r = ring.run_next(now)           # не более ОДНОГО due-шага (dispatch contract §2.1);
+                                     # blocked head (не-due) - ничего не выполняется (≤ T_step)
+    if r.executed and r.step_ms > T_step:
+      events->step_overrun(r.step_ms)   # наблюдаемое нарушение бюджета (obs #8)
+      watchdog.report_overrun(r.step_ms)  # F5-путь (эмиссия - у kernel, владельца портов, не у ring)
+  watchdog.reload()                  # безусловно на каждом тике: покрывает границу шага,
+                                     # idle и blocked head (INV-WATCHDOG-ARMED, #43 §4, #48 §3)
 
 TIM2 ISR (adapters/tim2):                        # единственный ISR #70; R2
   ++g_now_ms                                     # 64-bit tick
@@ -178,21 +196,33 @@ TIM2 ISR (adapters/tim2):                        # единственный ISR 
   # больше ничего: без policy, без run_due, без reload, без событий
 ```
 
+Семантика `scheduler_gap`: нормальный вход `process_tick` - каждый тик (gap = 1 ms);
+после полнобюджетного шага (≤ 10 ms) вход раздвигается до ~10-11 ms, поэтому порог
+`> 2 * T_step` (20 ms) исключает ложные события на границе (полнобюджетный шаг - легален).
+Flash-окно (W_flash ≈ 4 s) НЕ проявляется через `scheduler_gap`: при flash-stall
+TIM2 ISR отложен, потерянные тики не продвигают `g_now_ms` (продвижение не монотонно
+по wall-clock). Flash-влияние на исполняемый шаг детектится через `step_overrun(dt ≈ W_flash)`;
+flash в idle-состоянии не наблюдаем без wall-clock источника (см. §10 Unknowns).
+
 ### 3.2 Bounded step (run_next, foreground, один шаг за тик)
 
 ```
-run_next(now) -> bool:
-  if count == 0: return false
+run_next(now) -> StepRunResult:
+  if count == 0: return {executed: false, step_ms: 0}
   step = head()
-  if step.deadline_ms > now: return false        # blocking head: not due → очередь ждёт (≤ T_step, §2.1)
+  if static_cast<int32_t>(now_u32 - step.deadline_ms) < 0:   # модулярное сравнение (wrap-safe, §2.1)
+    return {executed: false, step_ms: 0}                     # blocking head: not due → очередь ждёт (≤ T_step, §2.1)
   t0 = ticks_us()
   step.fn(step.ctx)                              # run-to-completion, без вытеснения
-  dt = ticks_us() - t0
-  if dt > T_step:
-    events->step_overrun(dt)                     # наблюдаемое нарушение бюджета (obs #8)
-    watchdog.note_overrun()                      # F5-путь: starvation моделируется
+  dt_ms = (ticks_us() - t0) / 1000               # µs → ms (slice-единицы, не повторять slice-bug сравнения µs с ms)
   advance head, count--
-  return true
+  return {executed: true, step_ms: dt_ms}
+
+# kernel::process_tick - владелец портов, эмиссия здесь, не в ring (§2.1):
+  r = ring.run_next(now)
+  if r.executed and r.step_ms > T_step:
+    events->step_overrun(r.step_ms)              # наблюдаемое нарушение бюджета (obs #8)
+    watchdog.report_overrun(r.step_ms)           # F5-путь: starvation моделируется
 ```
 
 Reload-семантика: `process_tick` reload-ит безусловно после каждого тика, поэтому каждый выполненный шаг завершается reload'ом на границе следующего шага/тика (INV-WATCHDOG-ARMED). При шаге длительностью до T_step = 10 ms окно 6.8 s не может быть пропущено: максимум 1 шаг/тик, reload каждые 1 ms.
@@ -251,6 +281,7 @@ struct ResetCauseSource {
 | Каждый domain/adapter шаг ≤ T_step (10 ms) | #48 §4 | run_next бюджетная проверка + KernelEvents::step_overrun |
 | MaxSteps = 64, очередь bounded | #54 L7 | ring capacity + schedule_rejected |
 | Watchdog reload на границе шага и в idle | #43 §4, #48 §3 | host-тест F5 + L4 |
+| IWDG армируется до любых flash-операций (Boot journal-scan) | #49 §8.2 | стартап-порядок §6 + review |
 | reload между flash-операциями | #48 §3 | host-тест (два окна подряд) |
 | Monotonic wrap-safe, NTP-immune | #48 §9, #43 §4 | host property-тесты (#54 #9) |
 | Никакой динамической аллокации | #51 R1 | include-lint, clang-tidy, review |
@@ -325,7 +356,7 @@ loop() → kernel::run()
      │     ├─ Safety Authority tick (свой модуль #71)
      │     ├─ adapter drain (CAN/I2C/UART - свои слайсы)
      │     └─ monotonic::now_ms() (доменные таймауты)
-     │  └─ events->step_overrun(dt) | watchdog.note_overrun()
+     ├─ (если overrun) events->step_overrun(dt_ms); watchdog.report_overrun(dt_ms)  # эмиссия у kernel
      └─ watchdog.reload()                    # безусловно каждый тик (INV-WATCHDOG-ARMED)
 ```
 
@@ -347,10 +378,14 @@ void process_tick() {
     if (!initialized) return;
     uint64_t now = time->now_ms();
     uint64_t gap = now >= last_tick ? now - last_tick : 0;      // NTP-скок: clamp (INV-MONOTONIC)
-    if (gap > StepBudgetMs) events->scheduler_gap(gap);
+    if (gap > 2 * StepBudgetMs) events->scheduler_gap(gap);     // потеря ≥ 2 тиков; полнобюджетный шаг (≤10 ms) - не событие
     last_tick = now;
     if (!ring.empty()) {
-        ring.run_next(now);      // один due-шаг; blocked head - не выполняется (≤ T_step)
+        StepRing::StepRunResult r = ring.run_next(now);         // один due-шаг; blocked head - не выполняется (≤ T_step)
+        if (r.executed && r.step_ms > StepBudgetMs) {
+            events->step_overrun(r.step_ms);                    // эмиссия у kernel (владельца портов), не у ring
+            watchdog.report_overrun(r.step_ms);                 // F5-путь: starvation моделируется
+        }
     }
     watchdog.reload();           // безусловно каждый тик: граница шага + idle + blocked head (INV-WATCHDOG-ARMED)
 }
@@ -359,7 +394,7 @@ void process_tick() {
 void init(const KernelConfig& cfg) {
     cfg.reset->read() → events->reset_cause(cause);              // crash-запись через reboot (#49 §13)
     monotonic::init(*cfg.time);
-    watchdog::init(*cfg.hw);
+    watchdog::init(*cfg.hw);                                     // IWDG армируется до любых flash-операций (#49 §8.2)
     ring = {};
     last_tick = now_ms();
     initialized = true;
@@ -383,7 +418,7 @@ flowchart TD
     RUN --> PT["process_tick() (foreground, ≤1 шаг/тик)"]
     PT --> RN["StepRing::run_next(now)"]
     RN --> FN["StepFn(ctx)"]
-    RN --> OVR["events->step_overrun(dt)"]
+    PT --> OVR["(overrun) events->step_overrun(dt_ms) → watchdog.report_overrun(dt_ms)"]
     PT --> WDG["watchdog::reload() (безусловно каждый тик)"]
     INIT --> RC["reset->read() → events->reset_cause()"]
     INIT --> MONO["monotonic::init(TimeSource)"]
@@ -416,13 +451,13 @@ flowchart TD
 
 | # | Suite | Проверяемый контракт | Метод/oracle | Среда |
 | --- | --- | --- | --- | --- |
-| T1 | test_kernel | Каждый шаг ≤ T_step; overrun → KernelEvents::step_overrun | schedule(счётчик, 0) × N, N× process_tick(), assert events | host |
+| T1 | test_kernel | Каждый шаг ≤ T_step; overrun → KernelEvents::step_overrun | шаг, продвигающий TestTimeSource на > T_step внутри исполнения (host-шаги меряют ~0 µs - без продвижения overrun не сработает), assert events | host |
 | T2 | test_kernel | FIFO-порядок + «не раньше»: шаги выполняются в порядке schedule; blocked head (deadline в будущем) останавливает очередь, последующие шаги не выполняются до due | шаги с разными deadline, инъекция времени, assert порядка и блокировки | host |
 | T3 | test_kernel | Один шаг за тик: N due-шагов выполняются за N тиков (dispatch contract §2.1) | schedule N=5, 5× process_tick(), assert 1 шаг/тик | host |
 | T4 | test_kernel | MaxSteps=64; 65-й schedule → QueueFull + schedule_rejected | заполнение ring, assert | host |
 | T5 | test_kernel | DeadlineOutOfWindow: deadline > T_step → отклонён, в очередь не попадает | schedule(deadline=T_step+1) × N, assert результат + очередь | host |
 | T6 | test_kernel | Idle reload: пустая очередь → watchdog.reload вызван каждый тик | FakeWatchdog::reload_count | host |
-| T7 | test_kernel | scheduler_gap при пропуске тика (gap > T_step) | time jump + assert events | host |
+| T7 | test_kernel | scheduler_gap при потере ≥ 2 тиков подряд (gap > 2×T_step); полнобюджетный шаг (≤ T_step) НЕ даёт события | time jump на > 2×T_step и на ровно T_step, assert events | host |
 | T8 | test_monotonic | wrap-safe: 64-bit перенос не ломает now_ms | инъекция больших значений | host |
 | T9 | test_monotonic | Backward jump (NTP) → clamp, монотонность не нарушена (INV-MONOTONIC) | test_advance_ms(-X) | host |
 | T10 | test_monotonic | seqlock: torn-чтение детектируется (B1-фикс) | конкурентная инъекция (host-симуляция ISR) | host |
@@ -446,7 +481,7 @@ flowchart TD
 | #5 watchdog под combined load | T11, T12 host + T16 L4 |
 | #8 bounded steps | T1-T3, T7, T15, T16 |
 | #9 NTP-скачок не ломает monotonic | T9 |
-| #10 RAM/stack/CPU margin | target build: link map, `.su`, high-water (часть acceptance #70) |
+| #10 RAM/stack/CPU margin | target build: link map, `.su`, high-water + L4 CPU-load (DWT CYCCNT занятость foreground за окно 1 s, test-прошивка; CPU ≤ 70% #48 §8) |
 | #49 §13 reset-cause счётчики | KernelEvents::reset_cause + T14 |
 
 ## 10. Assumptions / Unknowns / Confidence
@@ -456,6 +491,7 @@ flowchart TD
 - **Fact**: slice `kernel::on_tick()` исполнялся из foreground `run()`; TIM2 ISR продвигал только часы. Production-дизайн закрепляет эту границу в имени API (`process_tick`) и контракте порта.
 - **Assumption**: `v3::` - неймспейс production-кода (замена `slice::`); альтернатива (имя проекта) - механическая правка без impact на контракты.
 - **Unknown**: точные длительности target-шагов и ISR-латентность - L4-измерения (#70 acceptance), не проектируются аналитически.
+- **Unknown**: flash-окно в idle-состоянии не наблюдаем через KernelEvents (нет wall-clock источника; при flash-stall ISR отложен и продвижение `g_now_ms` не монотонно по wall-clock). Детект flash на исполняемом шаге - через `step_overrun`; idle-flash - кандидат для Observability (Ф2, #72) с отдельным источником времени, вне scope #70.
 - **Unknown**: реализация KernelEvents-заглушки в Фазе 1 (UART vs no-op) - решается на имплементации #70, не влияет на контракт порта.
 
 ## 11. Условия пересмотра
