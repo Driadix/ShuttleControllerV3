@@ -18,6 +18,7 @@ Output:
     - frame count, CRC-valid / CRC-bad
     - per-msgID frame counts
     - MSG_LOG (0x10) text lines
+    - MSG_SENSORS (0x02) per-role distances + VALID bits
     - named decode for MSG_AS5600_HEALTH (0x09) when present
 
 Exit code: 0 only when at least one CRC-valid frame was captured.
@@ -59,8 +60,8 @@ SENSOR_ROLES = (
 
 
 def decode_sensors(payload: bytes) -> str:
-    if len(payload) < 16:
-        return f"sensors_short({len(payload)}B)"
+    if len(payload) != 16:
+        return f"sensors_bad_len({len(payload)}B)"
     hw_flags = int.from_bytes(payload[14:16], "little")
     parts = []
     for name, off, flag in SENSOR_ROLES:
