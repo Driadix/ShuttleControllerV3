@@ -110,7 +110,7 @@ class StepRing {
     StepRunResult run_next(std::uint64_t now);
     // deadline_ms - ABSOLUTE (хранится как есть; отличие от slice: slice хранил now+delta).
     // Окно [now, now + StepBudgetMs] валидирует kernel::schedule перед вызовом; ring - capacity.
-    ScheduleResult schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms, std::uint64_t now);
+    ScheduleResult schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms);
     bool empty() const;
     std::uint32_t count() const;
   private:
@@ -379,7 +379,7 @@ ScheduleResult schedule(StepFn fn, void* ctx, uint32_t deadline_ms) {
         return ScheduleResult::DeadlineOutOfWindow;   // stale (deadline в прошлом) или вне окна
     }
     if (ring.count() >= MaxSteps) { events->schedule_rejected(); return ScheduleResult::QueueFull; }
-    return ring.schedule(fn, ctx, deadline_ms, now);  // ring хранит absolute deadline как есть
+    return ring.schedule(fn, ctx, deadline_ms);       // ring хранит absolute deadline как есть
 }
 
 // process_tick - foreground-only, вызывается из run() (target) и тестами (host);
@@ -467,7 +467,7 @@ flowchart TD
 | T4 | test_kernel | MaxSteps=64; 65-й schedule → QueueFull + schedule_rejected | заполнение ring, assert | host |
 | T5 | test_kernel | DeadlineOutOfWindow: stale (deadline < now) и out-of-window (now + T_step + 1) отклоняются; граница now + T_step и wrap uint32 (now близко к 2^32) валидны | schedule(absolute deadline) с инъекцией now у границ, assert результат + очередь | host |
 | T6 | test_kernel | Idle reload: пустая очередь → watchdog.reload вызван каждый тик | FakeWatchdog::reload_count | host |
-| T7 | test_kernel | scheduler_gap при потере ≥ 2 тиков подряд (gap > 2×T_step); полнобюджетный шаг (≤ T_step) НЕ даёт события | time jump на > 2×T_step и на ровно T_step, assert events | host |
+| T7 | test_kernel | scheduler_gap при входе process_tick отложенном > 2×T_step (20 ms); полнобюджетный шаг (≤ T_step) НЕ даёт события | time jump на > 2×T_step и на ровно T_step, assert events | host |
 | T8 | test_monotonic | wrap-safe: 64-bit перенос не ломает now_ms | инъекция больших значений | host |
 | T9 | test_monotonic | Backward jump (NTP) → clamp, монотонность не нарушена (INV-MONOTONIC) | test_advance_ms(-X) | host |
 | T10 | test_monotonic | seqlock: torn-чтение детектируется (B1-фикс) | конкурентная инъекция (host-симуляция ISR) | host |
