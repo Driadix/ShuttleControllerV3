@@ -39,7 +39,8 @@
   ],
   "evidence": {
     "complete": true,
-    "missing": []
+    "missing": [],
+    "resultPath": "bench/operator-loop-proto/evidence/run-uart-probe/result-uart-probe.json"
   },
   "normalized": {
     "bytes": 0,

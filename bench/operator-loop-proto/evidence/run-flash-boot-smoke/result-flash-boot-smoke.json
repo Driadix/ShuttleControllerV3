@@ -76,7 +76,8 @@
   "reasons": [],
   "evidence": {
     "complete": true,
-    "missing": []
+    "missing": [],
+    "resultPath": "bench/operator-loop-proto/evidence/run-flash-boot-smoke/result-flash-boot-smoke.json"
   },
   "normalized": {
     "bytes": 0,

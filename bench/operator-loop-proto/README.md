@@ -114,7 +114,8 @@ Phase-1 kernel (KernelEvents stub is a no-op sink).
 {
   "schemaVersion": 1,
   "id": "flash-boot-smoke",
-  "title": "Flash boot smoke",
+  "title": "Flash verify: ST-Link flash + probe alive",
+  "type": "flash-verify",
   "phase": "L4",
   "flash": { "required": true, "env": "firmware" },
   "capture": { "port": "auto", "baud": 230400, "parity": "E",
@@ -123,6 +124,16 @@ Phase-1 kernel (KernelEvents stub is a no-op sink).
               "requirePatterns": [], "forbidPatterns": [] }
 }
 ```
+
+`type`: `behavior` (boot behavior: requires `minFrames>=1` or non-empty
+`requirePatterns`, else schema error) or `flash-verify` (PASS claims only
+flash + probe alive, never boot behavior; `minFrames=0` allowed).
+`minFrames` counts TOTAL received frames (valid + bad); a bad-only
+stream reaching `minFrames` fails on `maxCrcBadRatio`, not TIMEOUT.
+
+Verdict exit codes: PASS 0, FAIL 1, TIMEOUT 2, INCOMPLETE 3. Scenario
+schema violations (vacuous behavior oracle, behavior claim in
+flash-verify) are rejected BEFORE the run starts: exit 4, no side effects.
 
 ## Result format (schemaVersion 1)
 

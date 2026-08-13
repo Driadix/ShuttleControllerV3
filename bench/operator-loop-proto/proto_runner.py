@@ -380,10 +380,33 @@ def evaluate_oracle(scenario: dict, norm: dict) -> tuple:
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
+class SchemaError(RuntimeError):
+    """Scenario schema violation - run must not start (contract T11)."""
+
+
 def load_scenario(path: str) -> dict:
     sc = json.loads(Path(path).read_text(encoding="utf-8"))
     if sc.get("schemaVersion") != 1:
-        raise RuntimeError(f"unsupported schemaVersion: {sc.get('schemaVersion')}")
+        raise SchemaError(f"unsupported schemaVersion: {sc.get('schemaVersion')}")
+    stype = sc.get("type")
+    if stype not in ("behavior", "flash-verify"):
+        raise SchemaError(f"type must be 'behavior'|'flash-verify', got: {stype!r}")
+    o = sc.get("oracle", {})
+    min_frames = o.get("minFrames", 0)
+    req = o.get("requirePatterns", [])
+    forb = o.get("forbidPatterns", [])
+    if stype == "behavior":
+        # Non-vacuous rule (§2.1, §3.3): behavior must have observable
+        # positive; silence is never PASS of behavior.
+        if min_frames < 1 and not req:
+            raise SchemaError(
+                "behavior scenario must have minFrames>=1 or non-empty "
+                "requirePatterns (vacuous PASS prohibited, T11)")
+    else:  # flash-verify: PASS claims only flash + probe alive, never behavior
+        if min_frames != 0 or req or forb:
+            raise SchemaError(
+                "flash-verify scenario must have minFrames=0 and empty "
+                "pattern lists (no behavior claim allowed, T12)")
     return sc
 
 
@@ -483,8 +506,15 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
     if not result["firmware"].get("artifactSha256"):
         result["evidence"]["missing"].append("artifactSha256")
 
-    # 6. Capture + normalize
-    if result["uart"] and result["uart"]["open"]:
+    # 6. Capture + normalize - only when evidence is still complete
+    #    (refusal path skips capture: verdict is already INCOMPLETE)
+    if result["evidence"]["missing"]:
+        result["capture"] = {"rawPath": None, "rawBytes": 0,
+                             "durationS": scenario["capture"]["durationS"]}
+        norm = {"bytes": 0, "framesValid": 0, "framesBad": 0,
+                "msgCounts": {}, "logLines": []}
+        result["normalized"] = norm
+    elif result["uart"] and result["uart"]["open"]:
         if fixture:
             raw = fb
             raw_path = out_dir / f"raw-{scenario['id']}.bin"
@@ -517,9 +547,9 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
 
     result["finishedAt"] = utcnow()
     result_path = out_dir / f"result-{scenario['id']}.json"
+    result["evidence"]["resultPath"] = str(result_path)  # deterministic, pre-write
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2),
                            encoding="utf-8")
-    result["evidence"]["resultPath"] = str(result_path)
     return result
 
 
@@ -577,7 +607,13 @@ def main(argv=None) -> int:
         return 0
 
     if args.cmd == "run":
-        scenario = load_scenario(args.scenario)
+        try:
+            scenario = load_scenario(args.scenario)
+        except SchemaError as exc:
+            print(f"SCHEMA ERROR: {exc}", file=sys.stderr)
+            print("run not started (T11: schema error before any side effect)",
+                  file=sys.stderr)
+            return 4
         port = args.port or scenario["capture"].get("port") or DEFAULT_PORT
         if port == "auto":
             port = DEFAULT_PORT

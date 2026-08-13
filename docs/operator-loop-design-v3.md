@@ -96,7 +96,7 @@ flowchart LR
 | `capture.port` | `auto` → порт из конфигурации стенда (COM9); явный — приоритет | да |
 | `capture.baud/parity` | 230400 8E1 (network_bridge display profile, bench-контракт) | да |
 | `capture.durationS` | bounded окно захвата; по истечении — raw сохраняется, oracle оценивается | да |
-| `oracle.minFrames` | минимум CRC-валидных кадров; недостигнут → TIMEOUT | да |
+| `oracle.minFrames` | минимум принятых кадров (валидных + битых, суммарный счётчик); недостигнут → TIMEOUT (ничего не пришло); смесь битых кадров при достигнутом минимуме → FAIL по `maxCrcBadRatio` | да |
 | `oracle.maxCrcBadRatio` | доля битых кадров; превышение → FAIL | да |
 | `oracle.requirePatterns` | regex на декодированные MSG_LOG строки; все обязаны встретиться, иначе TIMEOUT | нет |
 | `oracle.forbidPatterns` | regex; любое совпадение → FAIL | нет |
@@ -168,7 +168,7 @@ out/<scenario>-<timestamp>/
   checklist.json           # подпись владельца (если flash)
 ```
 
-Полнота = `missing == []`. Потребители: evidence records (#52 §7.1: CI-artifact / measurement report), gate-тикеты (#68), nightly L4.
+Полнота = `missing == []`. `evidence.resultPath` вычисляется детерминированно из out-dir ДО записи файла (самоописывающий путь bundle). Потребители: evidence records (#52 §7.1: CI-artifact / measurement report), gate-тикеты (#68), nightly L4.
 
 ## 3. Трансформации
 
@@ -194,16 +194,18 @@ run <scenario>:
   if flash.required and not missing:
     flash()                            # pio run -e firmware -t upload (ST-Link)
   elif flash.required:
-    record flash: {skipped: true, reason: missing}   # отказ без side effects
+    record flash: {ok: false, skipped: true, reason: missing}  # отказ без side effects
   # 4. Identity firmware + toolchain (обязательное evidence)
   firmware = git identity + artifact sha256
   toolchain = pio versions
   if no gitSha: missing += gitSha
   if no artifactSha256: missing += artifactSha256
-  # 5. Capture (bounded) + normalize
-  raw = capture(port, durationS)       # bounded read, maxBytes guard
-  save raw-<scenario>.bin
-  normalized = decode_frames(raw)      # CRC16-CCITT, resync, MSG_LOG text
+  # 5. Capture (bounded) + normalize — только при пустом missing
+  #    (refusal-путь захват не выполняет: вердикт уже INCOMPLETE)
+  if not missing:
+    raw = capture(port, durationS)     # bounded read, maxBytes guard
+    save raw-<scenario>.bin
+    normalized = decode_frames(raw)    # CRC16-CCITT, resync, MSG_LOG text
   # 6. Полнота + вердикт
   if missing: verdict = INCOMPLETE (exit 3)     # отказ
   else: verdict = oracle(normalized)            # PASS/TIMEOUT/FAIL
@@ -250,7 +252,7 @@ Enforcement: runner — bench tooling в `bench/`, не входит в domain i
 ### 4.2 Evidence-контракт (инварианты)
 
 1. **Полнота**: `missing == []` — board identity, uart port, firmware SHA, artifact sha256, checklist (при flash), raw-артефакт записан.
-2. **Отказ при неполном наборе**: `INCOMPLETE`, exit 3; никакое физическое взаимодействие со стендом (probe включительно) не исполнялось (порядок gate'ов §3.1).
+2. **Отказ при неполном наборе**: `INCOMPLETE`, exit 3; на refusal-пути не исполняются операции с side effects — probe и flash (жёсткие gate'ы §3.1), а также пассивный UART-захват (вердикт уже INCOMPLETE, захват не нужен).
 3. **Идентичность**: каждый прогон связывает board (idcode+UID), firmware (gitSha+sha256), toolchain (версии) с raw-артефактом и нормализованным результатом.
 4. **Никаких путей фейка**: simulation-хуки прототипа (`--fixture`, `--simulate-board`) и авто-аттестация (`--yes`) в production контракт НЕ входят; evidence только с живых probe/capture; подпись checklist — интерактивно или пред-подписанным файлом владельца. Сценарий не может превратить failed product behavior в pass (scope #65).
 5. **Правило невакуумности**: `behavior`-сценарий обязан иметь наблюдаемый позитив (§2.1, §3.3); молчание не является PASS'ом поведения.
@@ -269,7 +271,7 @@ Enforcement: runner — bench tooling в `bench/`, не входит в domain i
 ### 4.4 Границы с тикетами
 
 - **#52**: runner — механизм исполнения L4/L5-сценариев и источник evidence records (§7.1); вердикт runner'а = CI-artifact (automated checks), не approval.
-- **#68 (gate 1→2)**: L4-evidence gate (T16 + observed maxima) исполняется через runner; критерии `docs/implementation-plan-v3.md` §5.
+- **#68 (gate 1→2)**: L4-evidence gate (C1/T_fs, freshness sub-budgets, combined load, watchdog, bounded steps на production baseline и L4 — критерии `docs/implementation-plan-v3.md` §5) исполняется через runner.
 - **#70 (T16)**: host-часть закрыта (PR #88); T16 L4 smoke — первый сценарий runner'а после approval контракта.
 - **#65**: реализует этот контракт одним вертикальным PR; сценарии/схемы/тесты — в его scope.
 - **#62 (CAN/timing)**: расширение сценариев секцией `measurement` (L5-фаза); не блокирует v1 формата.
@@ -360,16 +362,16 @@ flowchart LR
 | T8 identity | gitSha/artifactSha256 отсутствуют | missing += gitSha/artifactSha256 |
 | T9 verdict exit | PASS/FAIL/TIMEOUT/INCOMPLETE | 0/1/2/3 |
 | T10 bundle | result содержит rawPath, normalized, verdict | evidence.complete=true |
-| T11 vacuous oracle | behavior: minFrames=0 + пустые patterns | schema error, прогон не начинается |
+| T11 vacuous oracle | behavior: minFrames=0 + пустые patterns | schema error (exit 4), прогон не начинается |
 | T12 flash-verify | minFrames=0 + flash ok + probe alive | PASS без утверждения поведения |
 
-Property-описание: oracle-решения монотонны по `frames` (больше валидных кадров при том же ratio не ухудшает вердикт); полнота детерминирована (missing-множество не зависит от порядка gate'ов).
+Property-описание: (i) oracle-решения монотонны по `frames` для pattern-free oracles (без `forbidPatterns`/`requirePatterns`): больше принятых кадров при том же `maxCrcBadRatio` не ухудшает вердикт; с паттернами монотонность не гарантируется (валидный кадр с forbidden-строкой ухудшает). (ii) полнота детерминирована при фиксированном порядке gate'ов §3.1: для одного и того же прогона missing-множество воспроизводимо; порядок gate'ов (checklist → probe → port) фиксирован и не переупорядочивается.
 
 ## 8. Vertical slice граница (#65)
 
 **Наблюдаемый контракт**: representative сценарий на начальном сенсорном стенде запускается одной документированной командой и создаёт проверяемый, повторяемый evidence bundle; ошибки подключения, flash, timeout, malformed output и identity mismatch дают явный non-pass (scope #65, Acceptance).
 
-**Входит в PR #65**: CLI, versioned scenario schema v1, board/port discovery, ST-Link flash (gated), bounded capture, raw-артефакты, normalized result, identity binding, refusal paths, host-тесты T1-T10, README (одна команда).
+**Входит в PR #65**: CLI, versioned scenario schema v1, board/port discovery, ST-Link flash (gated), bounded capture, raw-артефакты, normalized result, identity binding, refusal paths, host-тесты T1-T12, README (одна команда).
 
 **Gate**: T16 L4 smoke исполняем через runner; сам T16 — после observability/UART-слайса (#72/#75, решение §0.4); результат runner'а — вход gate 1→2 (#68).
 
@@ -381,10 +383,10 @@ Property-описание: oracle-решения монотонны по `frames
 | --- | --- |
 | #52 §6.3 обязательные L5 acceptance (release gate: C1, T_fs, lease, watchdog, power-cut, CAN flood) | L5-сценарии runner'а (measurement-секция, #62) |
 | #52 §7.1 evidence records | runner-результат = CI-artifact/measurement report источник |
-| #52 §2 L4 nightly (bounded steps, high-water, журналы, verified-boot smoke) | nightly-сценарии runner'а |
+| #52 §2 L4 nightly (bounded steps, high-water, журналы, verified-boot smoke) | nightly-сценарии runner'а (после L5-расширения measurement, #62; v1 — UART-capture-only) |
 | #70 T16 L4 smoke + observed maxima | первый L4-сценарий после approval |
 | #68 gate 1→2 | L4-evidence через runner |
-| #43/#48 measurement obligations (bench-класс) | measurement-секция сценариев (L4/L5) |
+| #43/#48 measurement obligations (bench-класс) | measurement-секция сценариев (после #62, schemaVersion 2) |
 | #73 bench-контракт (порты, baud, кадры, gate) | фиксируется в scenario/oracle defaults |
 | #49 observability evidence (сырые логи как трассы) | raw-артефакт bundle (первичный источник) |
 | #51 §10 FW_GIT_SHA embedding | release-путь, read-back — отдельный слайс |
@@ -392,7 +394,7 @@ Property-описание: oracle-решения монотонны по `frames
 ## 10. Assumptions / Unknowns / Confidence
 
 - **Fact**: прототип проверен на офф-бенче (PASS/TIMEOUT/FAIL/INCOMPLETE с корректными exit-кодами); живой probe даёт idcode `0x100f6413` + UID (2026-08-13); отказ-gate (flash skipped при неполном evidence) исправлен и перепроверен.
-- **Fact**: плата стенда в текущем состоянии исполняет production kernel #70 (pc 0x0800296e внутри образа 0x356C; UART молчит — Ф1 no-op события). Восстановление bring-up прошивки — решение владельца (исходник в V1-репо).
+- **Fact**: плата стенда в текущем состоянии исполняет production kernel #70 (pc `0x0800296e` — замер живого probe OpenOCD halt, session тикета #60, 2026-08-13; образ 0x356C = 13676 B — вывод `pio run -e firmware`, сверяемо `firmware.map`; UART молчит — Ф1 no-op события, evidence `bench/operator-loop-proto/evidence/run-uart-probe`). Восстановление bring-up прошивки — решение владельца (исходник в V1-репо).
 - **Assumption**: стенд остаётся как в #73 (COM9 relay-дисплей; COM29 Prolific — альтернатива, не проверена).
 - **Assumption**: 230400 8E1 — единственный UART-контракт network_bridge на этом стенде.
 - **Decision**: наблюдаемость T16 — после observability/UART-слайса (#72/#75), heartbeat в production-потоке (§0.4); gate 1→2 сдвигается.
