@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "signed": true,
+  "owner": "Driadix",
+  "at": "2026-08-13T15:00:43.240006+00:00",
+  "items": [
+    {
+      "id": "probe",
+      "text": "ST-Link V2 подключен на XT21 (SWD), питание платы подано",
+      "confirmed": true
+    },
+    {
+      "id": "sensors",
+      "text": "ToF 0x09/0x0C и AS5600 подключены по bench record; 0x0A/0x0B отсутствуют (ожидаемый NACK)",
+      "confirmed": true
+    },
+    {
+      "id": "power",
+      "text": "Питание: ST-Link USB + USB-UART USB с одного ПК; признаков нагрева/нештатного поведения нет",
+      "confirmed": true
+    }
+  ]
+}
