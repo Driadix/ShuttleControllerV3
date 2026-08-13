@@ -38,6 +38,7 @@ flowchart LR
     WP --> IWDG
     RC -->|"ResetCauseSource::read (стартап)"| EC
     EC -->|"KernelEvents (Ф1: заглушка / Ф2: Producer)"| OP
+    EC -->|"SafetySlot::tick (каждая граница шага, вне FIFO)"| SA["Safety Authority<br/>(Ф2+, модуль #71; Ф1: заглушка)"]
 ```
 
 | Элемент | Компонент (#43 §2) | Владение | Примечание |
@@ -46,8 +47,9 @@ flowchart LR
 | Monotonic | platform (политика) + adapters (TIM2) | 64-bit wrap-safe время; TIM2-инициализация и ISR - адаптер | «Monotonic clock - порт execution core (tick source)» (#43 §4); Arduino API только в адаптере (#51 §5) |
 | Watchdog | platform (политика) + adapters (IWDG) | reload-политика у core, hardware у HAL | health-агрегация - Safety Authority (#43 §4) |
 | KernelEvents | domain-порт (исходящий) | реализует Observability Producer (Ф2) / заглушка (Ф1) | счётчики ведёт Producer (#43 §4: «компоненты эмитят события, счётчики ведёт Producer») |
+| SafetySlot | domain-порт (обязательная граница) | реализует Safety Authority (Ф2+, #71) / заглушка (Ф1) | freshness-check + arbitration на каждой границе шага, ВНЕ FIFO (#48 §4, #43 §3.1) |
 
-**Граница модуля (#70)**: execution core + monotonic + watchdog + их порты и стартап-порядок. НЕ входят: Safety Authority health-FSM (свой модуль #71), адаптеры CAN/I2C/UART/flash (свои слайсы), Observability Producer (#72). Execution core предоставляет только планирование/время/watchdog и события ядра.
+**Граница модуля (#70)**: execution core + monotonic + watchdog + их порты (включая SafetySlot-механизм и KernelEvents) и стартап-порядок. НЕ входят: Safety Authority health-FSM (свой модуль #71, реализация SafetySlot), адаптеры CAN/I2C/UART/flash (свои слайсы), Observability Producer (#72). Execution core предоставляет только планирование/время/watchdog, события ядра и обязательную safety-границу (механизм вызова, не политику).
 
 **ISR-граница (инвариант дизайна)**: единственный ISR в scope #70 - TIM2 clock ISR (адаптер), и он исполняет ровно две операции: `++g_now_ms` и seqlock-публикацию CYCCNT. Всё остальное - foreground. События ядра (overrun/gap/rejected) эмитятся из foreground `process_tick()`; из ISR не эмитится ничего (порт KernelEvents вызывается только из foreground, без прерываний — single-writer, R2).
 
@@ -94,8 +96,15 @@ enum class ScheduleResult : std::uint8_t {
 //   только после прохода - это нарушало «reload на каждой границе шага» и
 //   T_check_jitter/T_arb ≤ 1 шаг. Production: ОДИН bounded step за тик (1 ms);
 //   reload после каждого шага; возврат к time-check/arbitration после шага.
-//   Очередь дренируется ≤ 1 шаг/тик: полные 64 шага за ≤ 64 ms (bounded, #48 §8 jitter ≤ 1 шаг;
-//   combined load #8: сумма CPU-cost шагов тика ≤ T_step - выполняется тривиально).
+//   Очередь дренируется ≤ 1 шаг/тик: полные 64 шага - до 640 ms worst-case
+//   (64 × T_step при полных шагах; bounded, #48 §8 jitter ≤ 1 шаг; combined load #8:
+//   сумма CPU-cost шагов тика ≤ T_step - выполняется тривиально).
+//
+// Обязательная safety-граница (INV-SENSING-FRESH, #48 §4): freshness-check и
+// arbitration НЕ стоят в FIFO - они исполняются на каждой границе шага ВНЕ очереди
+// (см. §3.1 safety->tick после run_next). Бэклог очереди (64 шага × 10 ms = 640 ms)
+// не задерживает safety: между двумя safety-границами максимум один FIFO-шаг (≤ T_step),
+// поэтому T_check_jitter ≤ 1 шаг и T_arb ≤ 1 шаг соблюдены при любом размере очереди.
 class StepRing {
   public:
     struct StepRunResult {
@@ -159,13 +168,28 @@ namespace v3::watchdog {
 // domain/ports.h - исходящий порт ядра (foreground-only вызовы)
 struct KernelEvents {
     virtual void step_overrun(std::uint32_t step_ms) = 0;   // шаг > T_step (obs #8)
-    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // вход process_tick отложен > 2×StepBudgetMs (20 ms); flash-окно НЕ через gap (§3.1)
+    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // вход process_tick отложен > 3×StepBudgetMs (30 ms); легальная комбинация «шаг 10 ms + слот 10 ms + тик» (≈21 ms) - не событие; flash-окно НЕ через gap (§3.1)
     virtual void schedule_rejected() = 0;                   // очередь шагов полна (obs #7)
     virtual void reset_cause(ResetCause cause) = 0;         // стартап: crash-запись через reboot (#49 §13)
 };
 ```
 
 Фаза 1: заглушка (no-op / diagnostic UART sink). Фаза 2: реализация Observability Producer (#72) - счётчики, события, traces. Интерфейс стабилен между фазами. Контракт порта: вызовы только из foreground-контекста ядра, без вложенности (никаких вызовов из ISR), без блокировок (never-block, #43 §6).
+
+### 2.5 SafetySlot (обязательная safety-граница, вне FIFO)
+
+```cpp
+// domain/ports.h - обязательная safety-граница (#48 §4 INV-SENSING-FRESH)
+struct SafetySlot {
+    virtual void tick(std::uint64_t now) = 0;   // freshness-check + arbitration (#43 §3.1);
+                                                // вызывается execution core на КАЖДОЙ границе шага,
+                                                // ВНЕ FIFO-очереди, только из foreground
+};
+```
+
+- Гарантия планировщика: между двумя вызовами `SafetySlot::tick` исполняется максимум один FIFO-шаг (≤ T_step) и сам предыдущий слот (≤ T_step) — фактический интервал ≤ шаг + слот + тик (≈ 21 ms), независимо от размера очереди (dispatch contract §2.1). Отсюда `T_check_jitter ≤ 1 шаг` и `T_arb ≤ 1 шаг` (#48 §4, #45 §6) держатся при полном бэклоге (64 × 10 ms = 640 ms): интервал от события до начала проверки ≤ 1 FIFO-шаг, а не зависит от длины очереди.
+- Исполнение: `process_tick()` вызывает `safety->tick(now)` после `run_next` (или при пустой очереди — сразу), перед `watchdog.reload()`. Слот bounded (≤ T_step); если содержимое слота (реализация Safety Authority, модуль #71) нарушит бюджет — это overrun-путь, наблюдаемый через KernelEvents (#70 поставляет механизм, не реализацию).
+- Фаза 1: заглушка (no-op). Фаза 2+: реализация Safety Authority (#71) — единственная arbitration-воронка (#43 §3.1). Порт стабилен между фазами; scope #70 — механизм вызова и гарантия jitter, не сама safety-политика.
 
 ## 3. Трансформации
 
@@ -183,7 +207,7 @@ main loop (run, никогда не возвращается):
 process_tick():                      # foreground-only; НЕ ISR; максимум один шаг за тик
   now = time->now_ms()
   gap = now - last_tick              # в терминах продвижения тика, см. ниже
-  if gap > 2 * T_step: events->scheduler_gap(gap)   # вход отложен > 20 ms (2×T_step)
+  if gap > 3 * T_step: events->scheduler_gap(gap)   # вход отложен > 30 ms (3×T_step)
   last_tick = now
   if not ring.empty():
     r = ring.run_next(now)           # не более ОДНОГО due-шага (dispatch contract §2.1);
@@ -191,6 +215,14 @@ process_tick():                      # foreground-only; НЕ ISR; максиму
     if r.executed and r.step_ms > T_step:
       events->step_overrun(r.step_ms)   # наблюдаемое нарушение бюджета (obs #8)
       watchdog.report_overrun(r.step_ms)  # F5-путь (эмиссия - у kernel, владельца портов, не у ring)
+  t0 = ticks_us()                    # замер слота: слот bounded, нарушение наблюдаемо (§2.5)
+  safety->tick(now)                  # ОБЯЗАТЕЛЬНАЯ safety-граница, ВНЕ FIFO (#48 §4 INV-SENSING-FRESH):
+                                     # freshness-check + arbitration (#43 §3.1) на каждой границе шага;
+                                     # бэклог очереди её не задерживает (T_check_jitter/T_arb ≤ 1 шаг, §2.1)
+  dt_ms = (ticks_us() - t0) / 1000
+  if dt_ms > T_step:
+    events->step_overrun(dt_ms)      # содержимое слота превысило бюджет (наблюдаемо, §2.5)
+    watchdog.report_overrun(dt_ms)
   watchdog.reload()                  # безусловно на каждом тике: покрывает границу шага,
                                      # idle и blocked head (INV-WATCHDOG-ARMED, #43 §4, #48 §3)
 
@@ -201,12 +233,13 @@ TIM2 ISR (adapters/tim2):                        # единственный ISR 
 ```
 
 Семантика `scheduler_gap`: нормальный вход `process_tick` - каждый тик (gap = 1 ms);
-после полнобюджетного шага (≤ 10 ms) вход раздвигается до ~10-11 ms, поэтому порог
-`> 2 * T_step` (20 ms) исключает ложные события на границе (полнобюджетный шаг - легален).
-Flash-окно (W_flash ≈ 4 s) НЕ проявляется через `scheduler_gap`: при flash-stall
-TIM2 ISR отложен, потерянные тики не продвигают `g_now_ms` (продвижение не монотонно
-по wall-clock). Flash-влияние на исполняемый шаг детектится через `step_overrun(dt ≈ W_flash)`;
-flash в idle-состоянии не наблюдаем без wall-clock источника (см. §10 Unknowns).
+после легальной комбинации «полнобюджетный шаг (≤ 10 ms) + safety-слот (≤ 10 ms) + тик»
+вход раздвигается до ~21 ms, поэтому порог `> 3 * T_step` (30 ms) исключает ложные события
+на границе (шаг + слот - легальны). Flash-окно (W_flash ≈ 4 s) НЕ проявляется через
+`scheduler_gap`: при flash-stall TIM2 ISR отложен, потерянные тики не продвигают `g_now_ms`
+(продвижение не монотонно по wall-clock). Flash-влияние на исполняемый шаг детектится
+через `step_overrun(dt ≈ W_flash)`; flash в idle-состоянии не наблюдаем без wall-clock
+источника (см. §10 Unknowns).
 
 ### 3.2 Bounded step (run_next, foreground, один шаг за тик)
 
@@ -246,7 +279,7 @@ step overrun / scheduler gap / schedule reject / reset-cause
 
 | Модуль | Зависит от | НЕ зависит от |
 | --- | --- | --- |
-| `platform/execution_core.h/.cpp` | `platform/monotonic.h`, `platform/watchdog_policy.h`, `domain/ports.h` (KernelEvents, TimeSource) | Arduino Core, адаптеров |
+| `platform/execution_core.h/.cpp` | `platform/monotonic.h`, `platform/watchdog_policy.h`, `domain/ports.h` (KernelEvents, TimeSource, SafetySlot) | Arduino Core, адаптеров |
 | `platform/monotonic.h/.cpp` | `domain/ports.h` (TimeSource - интерфейс адаптера) | Arduino Core (policy-leg) |
 | `platform/watchdog_policy.h/.cpp` | `domain/ports.h` (WatchdogPort) | Arduino Core |
 | `adapters/tim2*` | Arduino Core (`HardwareTimer`), реализует `TimeSource` | domain |
@@ -276,6 +309,11 @@ enum class ResetCause : std::uint8_t { PowerOn, Watchdog, Software, External, Un
 struct ResetCauseSource {
     virtual ResetCause read() = 0;            // вызывается execution core на стартапе (foreground)
 };
+
+// SafetySlot - обязательная safety-граница (#48 §4, #43 §3.1); см. §2.5
+struct SafetySlot {
+    virtual void tick(std::uint64_t now) = 0; // freshness-check + arbitration; на каждой границе шага, вне FIFO
+};
 ```
 
 ### 4.3 Инварианты (наследуются, не пересматриваются)
@@ -283,6 +321,7 @@ struct ResetCauseSource {
 | Инвариант | Источник | Проверка |
 | --- | --- | --- |
 | Каждый domain/adapter шаг ≤ T_step (10 ms) | #48 §4 | run_next бюджетная проверка + KernelEvents::step_overrun |
+| INV-SENSING-FRESH: T_check_jitter ≤ 1 шаг, T_arb ≤ 1 шаг при любом бэклоге очереди | #48 §4, #45 §6 | SafetySlot вне FIFO, на каждой границе шага (§2.5); host-тест worst-case backlog (§7.3) |
 | MaxSteps = 64, очередь bounded | #54 L7 | ring capacity + schedule_rejected |
 | Watchdog reload на границе шага и в idle | #43 §4, #48 §3 | host-тест F5 + L4 |
 | IWDG армируется до любых flash-операций (Boot journal-scan) | #49 §8.2 | стартап-порядок §6 + review |
@@ -328,6 +367,7 @@ struct KernelConfig {
     WatchdogPort*            hw;        // domain/ports.h; обязателен (адаптер iwdg)
     KernelEvents*            events;    // domain/ports.h; обязателен (Ф1: заглушка, Ф2: Producer)
     ResetCauseSource*        reset;     // domain/ports.h; обязателен (адаптер reset_cause)
+    SafetySlot*              safety;    // domain/ports.h; обязателен (Ф1: заглушка, Ф2+: Safety Authority #71)
 };
 
 void init(const KernelConfig& cfg);       // стартап (foreground): reset-cause → events->reset_cause; порядок #43 §5
@@ -357,10 +397,11 @@ loop() → kernel::run()
   └─ process_tick()
      ├─ ring.run_next(now)                   # максимум один due-шаг за тик (dispatch contract §2.1)
      │  └─ StepFn (domain step)
-     │     ├─ Safety Authority tick (свой модуль #71)
      │     ├─ adapter drain (CAN/I2C/UART - свои слайсы)
      │     └─ monotonic::now_ms() (доменные таймауты)
      ├─ (если overrun) events->step_overrun(dt_ms); watchdog.report_overrun(dt_ms)  # эмиссия у kernel
+     ├─ safety->tick(now)                    # ОБЯЗАТЕЛЬНАЯ safety-граница ВНЕ FIFO (§2.5):
+     │  └─ Safety Authority freshness-check + arbitration (#71, #43 §3.1)
      └─ watchdog.reload()                    # безусловно каждый тик (INV-WATCHDOG-ARMED)
 ```
 
@@ -388,7 +429,7 @@ void process_tick() {
     if (!initialized) return;
     uint64_t now = time->now_ms();
     uint64_t gap = now >= last_tick ? now - last_tick : 0;      // NTP-скок: clamp (INV-MONOTONIC)
-    if (gap > 2 * StepBudgetMs) events->scheduler_gap(gap);     // вход отложен > 20 ms (2×T_step); полнобюджетный шаг (≤10 ms) - не событие
+    if (gap > 3 * StepBudgetMs) events->scheduler_gap(gap);     // вход отложен > 30 ms (3×T_step); «шаг 10 ms + слот 10 ms + тик» (≈21 ms) - не событие
     last_tick = now;
     if (!ring.empty()) {
         StepRing::StepRunResult r = ring.run_next(now);         // один due-шаг; blocked head - не выполняется (≤ T_step)
@@ -396,6 +437,14 @@ void process_tick() {
             events->step_overrun(r.step_ms);                    // эмиссия у kernel (владельца портов), не у ring
             watchdog.report_overrun(r.step_ms);                 // F5-путь: starvation моделируется
         }
+    }
+    uint64_t t0 = ticks_us();                                   // замер слота: bounded, нарушение наблюдаемо (§2.5)
+    safety->tick(now);  // обязательная safety-граница ВНЕ FIFO (§2.5): freshness-check + arbitration (#43 §3.1);
+                        // INV-SENSING-FRESH: T_check_jitter/T_arb ≤ 1 шаг при любом бэклоге (≤ 640 ms)
+    uint32_t s_ms = (uint32_t)((ticks_us() - t0) / 1000);
+    if (s_ms > StepBudgetMs) {
+        events->step_overrun(s_ms);                             // содержимое слота > T_step (наблюдаемо)
+        watchdog.report_overrun(s_ms);
     }
     watchdog.reload();           // безусловно каждый тик: граница шага + idle + blocked head (INV-WATCHDOG-ARMED)
 }
@@ -405,6 +454,7 @@ void init(const KernelConfig& cfg) {
     cfg.reset->read() → events->reset_cause(cause);              // crash-запись через reboot (#49 §13)
     monotonic::init(*cfg.time);
     watchdog::init(*cfg.hw);                                     // IWDG армируется до любых flash-операций (#49 §8.2)
+    safety_slot = cfg.safety;                                    // обязателен (Ф1: заглушка, Ф2+: Safety Authority #71)
     ring = {};
     last_tick = now_ms();
     initialized = true;
@@ -429,6 +479,8 @@ flowchart TD
     PT --> RN["StepRing::run_next(now)"]
     RN --> FN["StepFn(ctx)"]
     PT --> OVR["(overrun) events->step_overrun(dt_ms) → watchdog.report_overrun(dt_ms)"]
+    PT --> SAF["safety->tick(now) (ВНЕ FIFO, каждая граница шага)"]
+    SAF --> SA["Safety Authority freshness-check + arbitration (#71)"]
     PT --> WDG["watchdog::reload() (безусловно каждый тик)"]
     INIT --> RC["reset->read() → events->reset_cause()"]
     INIT --> MONO["monotonic::init(TimeSource)"]
@@ -446,8 +498,10 @@ flowchart TD
     G --> E["test_events"]
     K --> TS["TestTimeSource (инъекция тика)"]
     K --> RS["RecordingEvents (sink)"]
+    K --> FS["FakeSafety (счётчик tick, инъекция длительности)"]
     K --> KS["kernel::schedule / process_tick"]
     KS --> RING["StepRing"]
+    KS --> FS
     M --> TS
     M --> MONO["monotonic::now_ms / ticks_us"]
     W --> TS
@@ -467,7 +521,7 @@ flowchart TD
 | T4 | test_kernel | MaxSteps=64; 65-й schedule → QueueFull + schedule_rejected | заполнение ring, assert | host |
 | T5 | test_kernel | DeadlineOutOfWindow: stale (deadline < now) и out-of-window (now + T_step + 1) отклоняются; граница now + T_step и wrap uint32 (now близко к 2^32) валидны | schedule(absolute deadline) с инъекцией now у границ, assert результат + очередь | host |
 | T6 | test_kernel | Idle reload: пустая очередь → watchdog.reload вызван каждый тик | FakeWatchdog::reload_count | host |
-| T7 | test_kernel | scheduler_gap при входе process_tick отложенном > 2×T_step (20 ms); полнобюджетный шаг (≤ T_step) НЕ даёт события | time jump на > 2×T_step и на ровно T_step, assert events | host |
+| T7 | test_kernel | scheduler_gap при входе process_tick отложенном > 3×T_step (30 ms); легальная комбинация «шаг + слот» (≈21 ms) НЕ даёт события | time jump на > 3×T_step и на ровно шаг+слот, assert events | host |
 | T8 | test_monotonic | wrap-safe: 64-bit перенос не ломает now_ms | инъекция больших значений | host |
 | T9 | test_monotonic | Backward jump (NTP) → clamp, монотонность не нарушена (INV-MONOTONIC) | test_advance_ms(-X) | host |
 | T10 | test_monotonic | seqlock: torn-чтение детектируется (B1-фикс) | конкурентная инъекция (host-симуляция ISR) | host |
@@ -477,19 +531,21 @@ flowchart TD
 | T14 | test_kernel | Стартап: ResetCause прочитан → reset_cause-событие первым | FakeResetCause + init + assert order | host |
 | T15 | test_kernel | ISR-граница: tim2 TU не вызывает kernel/watchdog/events (нет эмиссии и reload из ISR-пути) | include-lint (#51 §5.2) + nm-проверка символов tim2_clock.o (нет ссылок на kernel/watchdog) | host |
 | T16 | target | Bounded steps под combined load на L4 (obs #8) | L4 сценарий (#52 §6.3, observed maxima) | L4 |
+| T17 | test_kernel | INV-SENSING-FRESH при worst-case backlog: 64 due-шага по ~T_step → safety->tick исполняется между каждым шагом, интервал между tick ≤ шаг + слот (≈21 ms, не зависит от размера очереди); интервал от события до начала проверки ≤ 1 шаг | schedule 64 шага (каждый продвигает TestTimeSource на ~T_step), 64× process_tick(), FakeSafety::interval_max ≤ шаг+слот, T_check_jitter/T_arb ≤ 1 шаг | host |
 
-Свойства (RapidCheck, #52 property): для любого порядка schedule/deadline ≤ MaxSteps - инварианты bounded (count ≤ MaxSteps, шаги не теряются, переполнение наблюдаемо, ≤ 1 шаг за тик).
+Свойства (RapidCheck, #52 property): для любого порядка schedule/deadline ≤ MaxSteps - инварианты bounded (count ≤ MaxSteps, шаги не теряются, переполнение наблюдаемо, ≤ 1 шаг за тик); для любого бэклога очереди (0..MaxSteps) - safety-граница вызывается на каждой границе шага, интервал между вызовами ≤ шаг + слот + тик (не зависит от бэклога, INV-SENSING-FRESH).
 
 ## 8. Vertical slice граница (#70)
 
-Один vertical PR: production execution core + monotonic + watchdog + KernelEvents порт + заглушка. Наблюдаемый контракт: bounded steps и watchdog-политика на host (T1-T15 host) и L4 smoke (T16) - именно это закрывает gate 1→2 (#68: bounded steps под combined load). Observability Producer не реализуется (#72); диагностика - через KernelEvents-заглушку и reset-cause.
+Один vertical PR: production execution core + monotonic + watchdog + KernelEvents порт + SafetySlot порт (Ф1: заглушки) + reset-cause. Наблюдаемый контракт: bounded steps и watchdog-политика на host (T1-T15, T17 host) и L4 smoke (T16) - именно это закрывает gate 1→2 (#68: bounded steps под combined load) и гарантирует INV-SENSING-FRESH (T_check_jitter/T_arb ≤ 1 шаг при любом бэклоге, #48 §4). Реализация Safety Authority - модуль #71 (подключается к SafetySlot в Фазе 2); Observability Producer не реализуется (#72); диагностика - через KernelEvents-заглушку и reset-cause.
 
 ## 9. Трассировка obligations
 
 | Obligation (#43 §8 / #48 §11) | Закрытие в #70 |
 | --- | --- |
 | #5 watchdog под combined load | T11, T12 host + L5 acceptance #4 (#70: watchdog не ресетит под combined load) |
-| #8 bounded steps | T1-T3, T7, T15, T16 |
+| #8 bounded steps | T1-T3, T7, T15-T17 |
+| INV-SENSING-FRESH (T_check_jitter/T_arb ≤ 1 шаг при любом бэклоге) | SafetySlot вне FIFO + T17 |
 | #9 NTP-скачок не ломает monotonic | T9 |
 | #10 RAM/stack/CPU margin | target build: link map, `.su`, high-water + L4 CPU-load (DWT CYCCNT занятость foreground за окно 1 s, test-прошивка; CPU ≤ 70% #48 §8) |
 | #49 §13 reset-cause счётчики | KernelEvents::reset_cause + T14 |
@@ -499,7 +555,9 @@ flowchart TD
 - **Fact**: slice StepRing/бюджетные проверки/seqlock проверены host-тестами (#54) - эволюционируют без переписывания (решение владельца).
 - **Fact**: IWDG 10 s, аппаратный диапазон 6.8-18.8 s (LSI 47/17 kHz), reload между flash-операциями обязателен (#48 §3).
 - **Fact**: slice `kernel::on_tick()` исполнялся из foreground `run()`; TIM2 ISR продвигал только часы. Production-дизайн закрепляет эту границу в имени API (`process_tick`) и контракте порта.
+- **Fact**: INV-SENSING-FRESH требует T_check_jitter/T_arb ≤ 1 шаг (#48 §4) при любом размере очереди; в slice это не держалось (safety как FIFO-шаг, бэклог до 640 ms). Production-дизайн: SafetySlot вне FIFO (§2.5).
 - **Assumption**: `v3::` - неймспейс production-кода (замена `slice::`); альтернатива (имя проекта) - механическая правка без impact на контракты.
+- **Unknown**: фактическая длительность содержимого SafetySlot (реализация #71) - бюджет слота ≤ T_step проверяется на имплементации #71; #70 поставляет механизм и гарантию интервала между вызовами ≤ шаг + слот + тик (не зависит от бэклога).
 - **Unknown**: точные длительности target-шагов и ISR-латентность - L4-измерения (#70 acceptance), не проектируются аналитически.
 - **Unknown**: flash-окно в idle-состоянии не наблюдаем через KernelEvents (нет wall-clock источника; при flash-stall ISR отложен и продвижение `g_now_ms` не монотонно по wall-clock). Детект flash на исполняемом шаге - через `step_overrun`; idle-flash - кандидат для Observability (Ф2, #72) с отдельным источником времени, вне scope #70.
 - **Unknown**: реализация KernelEvents-заглушки в Фазе 1 (UART vs no-op) - решается на имплементации #70, не влияет на контракт порта.
