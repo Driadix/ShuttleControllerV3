@@ -54,7 +54,8 @@ python tools/capture.py COM9 20
 ```
 
 Decodes and prints: raw byte count, frame count with CRC pass/fail, per-msgID
-counts, MSG_LOG text, and named `As5600HealthPacket` (MSG 0x09) decode.
+counts, MSG_LOG text, per-role SENSORS distances with VALID bits
+(MSG 0x02), and named `As5600HealthPacket` (MSG 0x09) decode.
 Requires `pyserial`.
 
 ## Wiring (XT22 -> T-Display S3)
