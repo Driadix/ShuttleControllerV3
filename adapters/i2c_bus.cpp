@@ -28,6 +28,18 @@ constexpr std::uint8_t kWireNackData = 3u;
 constexpr std::uint8_t kSdaPin = PB11;
 constexpr std::uint8_t kSclPin = PB10;
 constexpr std::uint32_t kBusHz = 100000u;
+constexpr std::uint32_t kSdaMask = 1u << 11;
+constexpr std::uint32_t kSclMask = 1u << 10;
+
+// Idle I2C lines are both high. A low line means the bus is held (e.g.
+// unpowered sensors pulling SDA/SCL down - the bench 5V-side loss, design
+// section 10): skip the Wire transaction entirely and report Stuck, because
+// STM32duino busy-spins up to I2C_TIMEOUT_TICK (100 ms) inside
+// endTransmission/requestFrom on a held bus - an unbounded step violation.
+bool bus_idle()
+{
+    return (GPIOB->IDR & (kSdaMask | kSclMask)) == (kSdaMask | kSclMask);
+}
 
 } // namespace
 
@@ -43,6 +55,13 @@ I2cResult I2cBus::read(std::uint8_t device, std::uint8_t reg,
     if (out == nullptr || len == 0u)
     {
         return I2cResult::Short;
+    }
+    if (!bus_idle())
+    {
+        // Bus held low (stuck): report Stuck without a blocking Wire call -
+        // the Sensing Service schedules recover() with its cooldown.
+        m_last_wire_status = 4u; // HAL busy/error class
+        return I2cResult::Stuck;
     }
 
     Wire.beginTransmission(device);
@@ -84,9 +103,13 @@ I2cResult I2cBus::read(std::uint8_t device, std::uint8_t reg,
 I2cResult I2cBus::recover()
 {
     // Reinit the peripheral and the pins; STM32duino begin() runs its bus
-    // recovery (<= 16 SCL pulses, STOP) for a master before starting, which
-    // satisfies the obligation #14 reinit + pulse mechanic. The >= 5 s
-    // cooldown between attempts is enforced by the Sensing Service.
+    // recovery for a master before starting (up to 20 SCL pulses, stopping
+    // as soon as the bus is released - the vendor core loops i < 20). The
+    // obligation #14 bound is <= 16 pulses; the vendor mechanic is the
+    // closest available without a custom pulse generator, and it stops on
+    // release rather than always pulsing 20x - documented in the design
+    // doc section 10. The >= 5 s cooldown between attempts is enforced by
+    // the Sensing Service.
     Wire.end();
     Wire.begin(kSdaPin, kSclPin);
     Wire.setClock(kBusHz);

@@ -270,6 +270,7 @@ adapters/
                            # status-классификация, recover() (reinit + <=16 SCL + cooldown)
 platform/
   main.cpp                 # + wiring Sensing Service -> kernel::schedule
+  sensing_schedule.h/.cpp  # glue: bounded step + re-arm (host-buildable, T16)
 tests/
   test_sensing/            # acquisition scheduling, freshness, faults, recovery, snapshots
 bench/
@@ -366,14 +367,28 @@ void SensingService::step(std::uint64_t now)
     m_next_step_ms = m_cfg.tof_slot_ms;
 }
 
-// Composition root (platform/main.cpp): планирует доменный шаг в kernel.
-void sensing_tick(void* ctx)
+// Composition root (platform/sensing_schedule.cpp): планирует доменный шаг в
+// kernel. Дедлайн перевооружения считается от СВЕЖЕГО now ПОСЛЕ шага: длинный
+// шаг (залипшая шина блокирует I2C-транзакцию) не должен делать дедлайн
+// просроченным - kernel молча отклоняет out-of-window; при отклонении
+// перевооружение с now+1 (в окне) - планирование не умирает молча (review
+// MAJOR fix #63). Дополнительно адаптер pre-flight проверяет уровни шины
+// (IDR): залипшая шина -> Stuck БЕЗ блокирующего Wire-вызова (иначе
+// busy-спин до 100 ms, unbounded step).
+void schedule_tick(void* ctx)
 {
     auto* svc = static_cast<v3::sensing::SensingService*>(ctx);
     const std::uint64_t now = v3::monotonic::now_ms();
     svc->step(now);
-    v3::kernel::schedule(&sensing_tick, ctx,
-                         static_cast<std::uint32_t>(now) + svc->next_step_ms());
+    const std::uint64_t now2 = v3::monotonic::now_ms();   // свежий now
+    const std::uint32_t deadline =
+        static_cast<std::uint32_t>(now2) + svc->next_step_ms();
+    if (v3::kernel::schedule(&schedule_tick, ctx, deadline)
+            != v3::kernel::ScheduleResult::Ok)
+    {
+        (void)v3::kernel::schedule(&schedule_tick, ctx,
+                                   static_cast<std::uint32_t>(now2) + 1u);
+    }
 }
 ```text
 
@@ -425,13 +440,14 @@ flowchart TD
 | T13 | test_sensing | snapshot потребителя: get_snapshot отдаёт последний валидный (fixed-width, no alloc) | прямые assert | host |
 | T14 | test_sensing | ISR-граница: i2c TU не вызывает kernel/sensing (нет вызовов из ISR-пути) | include-lint + nm-проверка символов | host |
 | T15 | test_sensing | Busy (BMS-quiet): слот пропущен без изменения state; следующий Ok продолжает каденцию | FakeI2cPort busy, assert | host |
+| T16 | test_sensing | Glue перевооружается после длинного шага: залипшая шина (read продвигает часы на 100 ms, busy-спин STM32duino) не убивает расписание - свежий now + перепланирование, следующий слот исполняется; recover#1 на первом Stuck, cooldown держится | kernel host + schedule_tick + FakeI2cPort(advance), assert queue/чтения | host |
 | L1 | L4 | Acquisition cadence, bounded step, stale/fault/recovery transitions на реальных датчиках; raw + normalized evidence | runner sensing-сценарий (RAM read-back, §5.1) | L4 |
 
 ## 8. Vertical slice граница (#63)
 
 Один vertical PR: Sensing Service + v3::I2cPort + I2C adapter (Wire 100 kHz, PB11/PB10) + snapshots/freshness/typed faults + host-тесты T1-T15 + runner-сценарий L4 (RAM read-back). Наблюдаемый контракт (Acceptance тикета): host-тесты защищают state/freshness/recovery; L4 runner подтверждает acquisition cadence, bounded step duration, stale/fault transitions и recovery на реальных датчиках (0x09/0x0C present -> Healthy, 0x0A/0x0B absent -> Faulted NACK, AS5600 -> Healthy) с raw и normalized evidence.
 
-**Зависимость от стенда**: L4 acceptance требует живых датчиков (5V/GNDREF питание). При недоступности стенда - evidence по host + прототип (деградация документируется, #52 §12).
+**Зависимость от стенда**: L4 acceptance требует живых датчиков (5V/GNDREF питание) И production-диагностической RAM-секции (снапшоты по pinned адресу, читаемые runner'ом) - последняя является реализацией решения владельца §0 п.3 (RAM read-back наблюдаемость, UART молчит в Фазе 1). До принятия решения runner v2-механизм (tools/readback.py, evaluate_readback_oracle, schema scenario-v2, gated observation) поставляется, но L1-сценарий `sensing-acquire` НЕ включается (структура секции фиксируется после §0). При недоступности стенда - evidence по host + прототип (деградация документируется, #52 §12).
 
 ## 9. Трассировка obligations
 
@@ -455,7 +471,9 @@ flowchart TD
 - **Unknown**: фактическая длительность ToF-чтения на живом датчике (прототип мерил только NACK-путь, 4-5 µs; норматив ~1.2-1.5 ms, #48 §4 code-derived) - подтверждается L1 (tof read duration, bounded step).
 - **Assumption**: Wire без DMA блокирует только на время транзакции (bounded, ≤ слот) - допустимо в шаге (обоснование §2.3); альтернатива (DMA-I2C) - отдельное решение, если измерение L1 покажет превышение бюджета.
 - **Unknown**: wire-маппинг typed faults/warnings (registry #47 §16.4 в разработке) - в #63 доменные enum; wire-коды добавляются при готовности реестра (аддитивно, без изменения контракта порта).
-- **Confidence**: высокая по state/freshness/recovery (V1 keep, host-тестируемо); средняя по L4-evidence (зависит от восстановления питания стенда).
+- **Fact/отклонение**: recovery-механика адаптера - reinit + recoverBus ядра STM32duino (до 20 SCL-импульсов, останавливается при освобождении шины); норматив #48 §7/obligation #14 - ≤ 16 импульсов. Буквальное расхождение (20 max у ядра) принято: механика идентична (импульсы до отпускания), собственный генератор ≤16 импульсов - избыточность для Фазы 1; пересмотр при L4-замере recovery.
+- **NIT (принят)**: age_ms - uint32; возраст сэмпла > ~49.7 суток непрерывной работы с мёртвым сенсором оборачивается (stale не сработает). Недостижимо практически: RR-опрос каждые 8 ms, стрик-фейлы Fault-ят задолго (threshold 3). Дизайн-бюджет - uint32 age (как в V1).
+- **Confidence**: высокая по state/freshness/recovery (V1 keep, host-тестируемо); средняя по L4-evidence (зависит от восстановления питания стенда и HITL-решения §0 по диагностической секции).
 
 ## 11. Условия пересмотра
 

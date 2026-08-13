@@ -20,6 +20,7 @@
 #include "domain/sensing.h"
 #include "platform/execution_core.h"
 #include "platform/monotonic.h"
+#include "platform/sensing_schedule.h"
 
 namespace
 {
@@ -54,18 +55,6 @@ class SafetySlotStub : public v3::SafetySlot
 KernelEventsStub g_events;
 SafetySlotStub g_safety;
 
-// Composition-root glue for the sensing slice: one bounded step per
-// invocation (deadline now + tof_slot_ms, in the kernel window), re-scheduled
-// after every execution. The service itself is framework-free (#43).
-void sensing_tick(void* ctx)
-{
-    auto* svc = static_cast<v3::sensing::SensingService*>(ctx);
-    const std::uint64_t now = v3::monotonic::now_ms();
-    svc->step(now);
-    v3::kernel::schedule(&sensing_tick, ctx,
-                         static_cast<std::uint32_t>(now) + svc->next_step_ms());
-}
-
 } // namespace
 
 void setup()
@@ -80,11 +69,12 @@ void setup()
     v3::kernel::init(cfg);
 
     // Sensing slice (#63): I2C adapter init + service start; the first slot
-    // is due immediately (deadline now, within the kernel window).
+    // is due immediately (deadline now, within the kernel window). The glue
+    // (platform/sensing_schedule.h) re-arms itself after every step.
     g_i2c.init();
     g_sensing.init(v3::sensing::SensingConfig{}, g_i2c);
     const std::uint64_t now = v3::monotonic::now_ms();
-    v3::kernel::schedule(&sensing_tick, &g_sensing,
+    v3::kernel::schedule(&v3::sensing::schedule_tick, &g_sensing,
                          static_cast<std::uint32_t>(now));
 }
 

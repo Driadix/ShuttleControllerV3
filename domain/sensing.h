@@ -119,7 +119,8 @@ class SensingService
 
   private:
     void record_success(SensorId id, std::uint64_t now, std::uint32_t raw, std::uint32_t raw2);
-    void record_failure(SensorId id, std::uint64_t now, SensorFault fault);
+    void record_failure(SensorId id, std::uint64_t now, SensorFault fault,
+                        std::uint8_t status);
     void schedule_recovery(std::uint64_t now);
     void refresh_freshness(std::uint64_t now);
 

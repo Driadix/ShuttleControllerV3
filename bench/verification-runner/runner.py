@@ -576,10 +576,13 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
                 addr = int(rb["addr"])
                 words = int(rb["words"])
                 window = float(rb["windowS"])
-                half = window / 2.0
-                time.sleep(half)
+                # Snapshot A as soon as the firmware is running, B after the
+                # full window: the delta rules in the scenario accumulate
+                # over `window` (not half of it - review MAJOR fix, #63).
+                settle = min(2.0, window * 0.2)
+                time.sleep(settle)
                 snap_a = readback.read_ram_words(addr, words)
-                time.sleep(half)
+                time.sleep(window - settle)
                 snap_b = readback.read_ram_words(addr, words)
                 a_path = out_dir / f"raw-{scenario['id']}-a.mdw"
                 b_path = out_dir / f"raw-{scenario['id']}-b.mdw"
@@ -740,7 +743,7 @@ def main(argv=None) -> int:
             print("run not started (schema error before any side effect)",
                   file=sys.stderr)
             return 4
-        port = args.port or scenario["capture"].get("port") or DEFAULT_PORT
+        port = args.port or scenario.get("capture", {}).get("port") or DEFAULT_PORT
         if port == "auto":
             port = DEFAULT_PORT
         out_dir = Path(args.out_dir) if args.out_dir else (

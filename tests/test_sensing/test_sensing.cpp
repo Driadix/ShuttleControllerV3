@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 
 #include "domain/sensing.h"
+#include "platform/sensing_schedule.h"
+#include "tests/common/kernel_env.h"
 
 namespace
 {
@@ -41,6 +43,10 @@ class FakeI2cPort : public v3::I2cPort
     v3::I2cResult read(std::uint8_t device, std::uint8_t reg,
                        std::uint8_t* out, std::uint8_t len) override
     {
+        if (m_time != nullptr && m_advance_ms > 0)
+        {
+            m_time->advance_ms(m_advance_ms); // stuck-bus simulation
+        }
         if (m_log_count < kMaxLog)
         {
             m_log_devices[m_log_count] = device;
@@ -112,6 +118,12 @@ class FakeI2cPort : public v3::I2cPort
         m_read_pos = 0;
     }
 
+    // Long-step simulation (glue re-arm test): every read advances the
+    // injected test clock, modelling a stuck bus blocking the I2C
+    // transaction (STM32duino busy-spin up to 100 ms).
+    void set_time(testfakes::TestTimeSource* t) { m_time = t; }
+    void set_advance(std::uint64_t ms) { m_advance_ms = ms; }
+
     std::uint32_t recover_count() const { return m_recover_count; }
     std::uint32_t log_count() const { return m_log_count; }
     std::uint8_t log_device(std::uint32_t i) const { return m_log_devices[i]; }
@@ -126,6 +138,8 @@ class FakeI2cPort : public v3::I2cPort
     std::uint8_t m_log_devices[kMaxLog] = {};
     std::uint8_t m_log_regs[kMaxLog] = {};
     std::uint8_t m_last_status = 0;
+    testfakes::TestTimeSource* m_time = nullptr;
+    std::uint64_t m_advance_ms = 0;
 };
 
 // ToF measurement block bytes for a 1500 mm / signal 100 sample (0x20..0x2C:
@@ -580,3 +594,51 @@ TEST_F(SensingTest, BusySlotSkipped)
 }
 
 } // namespace
+
+// T16: composition-root glue re-arms after a long step - a stuck bus (every
+// read advances the clock by 100 ms, modelling the STM32duino busy-spin)
+// must NOT kill the scheduling: the re-arm deadline is computed from a fresh
+// post-step clock read, so the next slot is scheduled in-window and the
+// acquisition keeps running (review MAJOR fix, #63 - "silent dead
+// scheduling" regression test).
+class SensingGlueTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        m_env.init();
+        m_i2c.set_time(&m_env.time);
+        m_i2c.set_advance(100);
+        m_i2c.queue(v3::I2cResult::Stuck);
+        m_i2c.repeat_last(64);
+        m_svc.init(m_cfg, m_i2c);
+    }
+
+    testfakes::KernelEnv m_env;
+    FakeI2cPort m_i2c;
+    v3::sensing::SensingConfig m_cfg{};
+    SensingService m_svc;
+};
+
+TEST_F(SensingGlueTest, ReschedulesAfterLongStep)
+{
+    // First arm, exactly like platform/main.cpp setup(): deadline = now.
+    m_env.time.set_time_ms(0);
+    ASSERT_EQ(v3::kernel::schedule(&v3::sensing::schedule_tick, &m_svc, 0u),
+              v3::kernel::ScheduleResult::Ok);
+
+    // Tick 0: runs the step (100 ms virtual), the glue re-arms with a fresh
+    // deadline now+8 = 108 (inside [100, 110]).
+    v3::kernel::process_tick();
+    EXPECT_EQ(m_i2c.recover_count(), 1u); // first Stuck -> recover #1
+
+    // Tick 108: the re-armed slot is due and executes - the acquisition is
+    // alive after a long step (with the pre-fix glue the deadline 0+8=8 was
+    // stale at now=100 and the schedule was silently rejected).
+    m_env.time.advance_ms(108);
+    v3::kernel::process_tick();
+    EXPECT_GE(m_i2c.log_count(), 2u); // two ToF reads => two steps executed
+    // Cooldown: the second Stuck (at now=208) is within 5 s of the first
+    // recover (at 0) -> no second recover yet.
+    EXPECT_EQ(m_i2c.recover_count(), 1u);
+}

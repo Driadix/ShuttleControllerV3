@@ -66,8 +66,10 @@ void SensingService::step(std::uint64_t now)
     }
     else if (r == I2cResult::Stuck)
     {
-        // Bus in an invalid state (HAL BUSY/TIMEOUT/ERROR): recover candidate.
-        record_failure(static_cast<SensorId>(idx), now, SensorFault::BusStuck);
+        // Bus in an invalid state (HAL BUSY/TIMEOUT/ERROR or held-low):
+        // recover candidate.
+        record_failure(static_cast<SensorId>(idx), now, SensorFault::BusStuck,
+                       static_cast<std::uint8_t>(r));
         schedule_recovery(now);
     }
     else if (r == I2cResult::Busy)
@@ -79,13 +81,15 @@ void SensingService::step(std::uint64_t now)
     {
         // Device absent/unpowered or under-read (V1 TOF_Sense): transport
         // failure WITHOUT bus recovery (recovery is for stuck buses only).
-        record_failure(static_cast<SensorId>(idx), now, SensorFault::NoAck);
+        record_failure(static_cast<SensorId>(idx), now, SensorFault::NoAck,
+                       static_cast<std::uint8_t>(r));
     }
     else
     {
         // Recovered is a recover() outcome, not a read() one; treat
         // defensively as a transport failure without recovery escalation.
-        record_failure(static_cast<SensorId>(idx), now, SensorFault::NoAck);
+        record_failure(static_cast<SensorId>(idx), now, SensorFault::NoAck,
+                       static_cast<std::uint8_t>(r));
     }
 
     // AS5600: 250 ms service (period tracked internally; the 8 ms slot is the
@@ -103,7 +107,8 @@ void SensingService::step(std::uint64_t now)
         }
         else if (ra == I2cResult::Stuck)
         {
-            record_failure(SensorId::As5600, now, SensorFault::BusStuck);
+            record_failure(SensorId::As5600, now, SensorFault::BusStuck,
+                           static_cast<std::uint8_t>(ra));
             schedule_recovery(now);
         }
         else if (ra == I2cResult::Busy)
@@ -113,7 +118,8 @@ void SensingService::step(std::uint64_t now)
         else
         {
             // NoAck/Short/Recovered: transport failure without bus recovery.
-            record_failure(SensorId::As5600, now, SensorFault::NoAck);
+            record_failure(SensorId::As5600, now, SensorFault::NoAck,
+                           static_cast<std::uint8_t>(ra));
         }
     }
 
@@ -157,10 +163,12 @@ void SensingService::record_success(SensorId id, std::uint64_t now, std::uint32_
     }
 }
 
-void SensingService::record_failure(SensorId id, std::uint64_t now, SensorFault fault)
+void SensingService::record_failure(SensorId id, std::uint64_t now, SensorFault fault,
+                                    std::uint8_t status)
 {
     SensorSnapshot& s = m_snapshots[static_cast<std::uint32_t>(id)];
     s.fault = fault;
+    s.last_status = status; // contract: I2cResult of the last attempt
     s.consecutive_successes = 0;
     if (s.consecutive_failures < 0xFFu)
     {
