@@ -38,6 +38,7 @@ flowchart LR
     WP --> IWDG
     RC -->|"ResetCauseSource::read (стартап)"| EC
     EC -->|"KernelEvents (Ф1: заглушка / Ф2: Producer)"| OP
+    EC -->|"SafetySlot::tick (каждая граница шага, вне FIFO)"| SA["Safety Authority<br/>(Ф2+, модуль #71; Ф1: заглушка)"]
 ```
 
 | Элемент | Компонент (#43 §2) | Владение | Примечание |
@@ -167,7 +168,7 @@ namespace v3::watchdog {
 // domain/ports.h - исходящий порт ядра (foreground-only вызовы)
 struct KernelEvents {
     virtual void step_overrun(std::uint32_t step_ms) = 0;   // шаг > T_step (obs #8)
-    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // вход process_tick отложен > 2×StepBudgetMs (20 ms); flash-окно НЕ через gap (§3.1)
+    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // вход process_tick отложен > 3×StepBudgetMs (30 ms); легальная комбинация «шаг 10 ms + слот 10 ms + тик» (≈21 ms) - не событие; flash-окно НЕ через gap (§3.1)
     virtual void schedule_rejected() = 0;                   // очередь шагов полна (obs #7)
     virtual void reset_cause(ResetCause cause) = 0;         // стартап: crash-запись через reboot (#49 §13)
 };
@@ -186,7 +187,7 @@ struct SafetySlot {
 };
 ```
 
-- Гарантия планировщика: между двумя вызовами `SafetySlot::tick` исполняется максимум один FIFO-шаг (≤ T_step), независимо от размера очереди (dispatch contract §2.1). Отсюда `T_check_jitter ≤ 1 шаг` и `T_arb ≤ 1 шаг` (#48 §4, #45 §6) держатся при полном бэклоге (64 × 10 ms = 640 ms).
+- Гарантия планировщика: между двумя вызовами `SafetySlot::tick` исполняется максимум один FIFO-шаг (≤ T_step) и сам предыдущий слот (≤ T_step) — фактический интервал ≤ шаг + слот + тик (≈ 21 ms), независимо от размера очереди (dispatch contract §2.1). Отсюда `T_check_jitter ≤ 1 шаг` и `T_arb ≤ 1 шаг` (#48 §4, #45 §6) держатся при полном бэклоге (64 × 10 ms = 640 ms): интервал от события до начала проверки ≤ 1 FIFO-шаг, а не зависит от длины очереди.
 - Исполнение: `process_tick()` вызывает `safety->tick(now)` после `run_next` (или при пустой очереди — сразу), перед `watchdog.reload()`. Слот bounded (≤ T_step); если содержимое слота (реализация Safety Authority, модуль #71) нарушит бюджет — это overrun-путь, наблюдаемый через KernelEvents (#70 поставляет механизм, не реализацию).
 - Фаза 1: заглушка (no-op). Фаза 2+: реализация Safety Authority (#71) — единственная arbitration-воронка (#43 §3.1). Порт стабилен между фазами; scope #70 — механизм вызова и гарантия jitter, не сама safety-политика.
 
@@ -206,7 +207,7 @@ main loop (run, никогда не возвращается):
 process_tick():                      # foreground-only; НЕ ISR; максимум один шаг за тик
   now = time->now_ms()
   gap = now - last_tick              # в терминах продвижения тика, см. ниже
-  if gap > 2 * T_step: events->scheduler_gap(gap)   # вход отложен > 20 ms (2×T_step)
+  if gap > 3 * T_step: events->scheduler_gap(gap)   # вход отложен > 30 ms (3×T_step)
   last_tick = now
   if not ring.empty():
     r = ring.run_next(now)           # не более ОДНОГО due-шага (dispatch contract §2.1);
@@ -214,9 +215,14 @@ process_tick():                      # foreground-only; НЕ ISR; максиму
     if r.executed and r.step_ms > T_step:
       events->step_overrun(r.step_ms)   # наблюдаемое нарушение бюджета (obs #8)
       watchdog.report_overrun(r.step_ms)  # F5-путь (эмиссия - у kernel, владельца портов, не у ring)
+  t0 = ticks_us()                    # замер слота: слот bounded, нарушение наблюдаемо (§2.5)
   safety->tick(now)                  # ОБЯЗАТЕЛЬНАЯ safety-граница, ВНЕ FIFO (#48 §4 INV-SENSING-FRESH):
                                      # freshness-check + arbitration (#43 §3.1) на каждой границе шага;
                                      # бэклог очереди её не задерживает (T_check_jitter/T_arb ≤ 1 шаг, §2.1)
+  dt_ms = (ticks_us() - t0) / 1000
+  if dt_ms > T_step:
+    events->step_overrun(dt_ms)      # содержимое слота превысило бюджет (наблюдаемо, §2.5)
+    watchdog.report_overrun(dt_ms)
   watchdog.reload()                  # безусловно на каждом тике: покрывает границу шага,
                                      # idle и blocked head (INV-WATCHDOG-ARMED, #43 §4, #48 §3)
 
@@ -227,12 +233,13 @@ TIM2 ISR (adapters/tim2):                        # единственный ISR 
 ```
 
 Семантика `scheduler_gap`: нормальный вход `process_tick` - каждый тик (gap = 1 ms);
-после полнобюджетного шага (≤ 10 ms) вход раздвигается до ~10-11 ms, поэтому порог
-`> 2 * T_step` (20 ms) исключает ложные события на границе (полнобюджетный шаг - легален).
-Flash-окно (W_flash ≈ 4 s) НЕ проявляется через `scheduler_gap`: при flash-stall
-TIM2 ISR отложен, потерянные тики не продвигают `g_now_ms` (продвижение не монотонно
-по wall-clock). Flash-влияние на исполняемый шаг детектится через `step_overrun(dt ≈ W_flash)`;
-flash в idle-состоянии не наблюдаем без wall-clock источника (см. §10 Unknowns).
+после легальной комбинации «полнобюджетный шаг (≤ 10 ms) + safety-слот (≤ 10 ms) + тик»
+вход раздвигается до ~21 ms, поэтому порог `> 3 * T_step` (30 ms) исключает ложные события
+на границе (шаг + слот - легальны). Flash-окно (W_flash ≈ 4 s) НЕ проявляется через
+`scheduler_gap`: при flash-stall TIM2 ISR отложен, потерянные тики не продвигают `g_now_ms`
+(продвижение не монотонно по wall-clock). Flash-влияние на исполняемый шаг детектится
+через `step_overrun(dt ≈ W_flash)`; flash в idle-состоянии не наблюдаем без wall-clock
+источника (см. §10 Unknowns).
 
 ### 3.2 Bounded step (run_next, foreground, один шаг за тик)
 
@@ -422,7 +429,7 @@ void process_tick() {
     if (!initialized) return;
     uint64_t now = time->now_ms();
     uint64_t gap = now >= last_tick ? now - last_tick : 0;      // NTP-скок: clamp (INV-MONOTONIC)
-    if (gap > 2 * StepBudgetMs) events->scheduler_gap(gap);     // вход отложен > 20 ms (2×T_step); полнобюджетный шаг (≤10 ms) - не событие
+    if (gap > 3 * StepBudgetMs) events->scheduler_gap(gap);     // вход отложен > 30 ms (3×T_step); «шаг 10 ms + слот 10 ms + тик» (≈21 ms) - не событие
     last_tick = now;
     if (!ring.empty()) {
         StepRing::StepRunResult r = ring.run_next(now);         // один due-шаг; blocked head - не выполняется (≤ T_step)
@@ -431,8 +438,14 @@ void process_tick() {
             watchdog.report_overrun(r.step_ms);                 // F5-путь: starvation моделируется
         }
     }
+    uint64_t t0 = ticks_us();                                   // замер слота: bounded, нарушение наблюдаемо (§2.5)
     safety->tick(now);  // обязательная safety-граница ВНЕ FIFO (§2.5): freshness-check + arbitration (#43 §3.1);
                         // INV-SENSING-FRESH: T_check_jitter/T_arb ≤ 1 шаг при любом бэклоге (≤ 640 ms)
+    uint32_t s_ms = (uint32_t)((ticks_us() - t0) / 1000);
+    if (s_ms > StepBudgetMs) {
+        events->step_overrun(s_ms);                             // содержимое слота > T_step (наблюдаемо)
+        watchdog.report_overrun(s_ms);
+    }
     watchdog.reload();           // безусловно каждый тик: граница шага + idle + blocked head (INV-WATCHDOG-ARMED)
 }
 
@@ -508,7 +521,7 @@ flowchart TD
 | T4 | test_kernel | MaxSteps=64; 65-й schedule → QueueFull + schedule_rejected | заполнение ring, assert | host |
 | T5 | test_kernel | DeadlineOutOfWindow: stale (deadline < now) и out-of-window (now + T_step + 1) отклоняются; граница now + T_step и wrap uint32 (now близко к 2^32) валидны | schedule(absolute deadline) с инъекцией now у границ, assert результат + очередь | host |
 | T6 | test_kernel | Idle reload: пустая очередь → watchdog.reload вызван каждый тик | FakeWatchdog::reload_count | host |
-| T7 | test_kernel | scheduler_gap при входе process_tick отложенном > 2×T_step (20 ms); полнобюджетный шаг (≤ T_step) НЕ даёт события | time jump на > 2×T_step и на ровно T_step, assert events | host |
+| T7 | test_kernel | scheduler_gap при входе process_tick отложенном > 3×T_step (30 ms); легальная комбинация «шаг + слот» (≈21 ms) НЕ даёт события | time jump на > 3×T_step и на ровно шаг+слот, assert events | host |
 | T8 | test_monotonic | wrap-safe: 64-bit перенос не ломает now_ms | инъекция больших значений | host |
 | T9 | test_monotonic | Backward jump (NTP) → clamp, монотонность не нарушена (INV-MONOTONIC) | test_advance_ms(-X) | host |
 | T10 | test_monotonic | seqlock: torn-чтение детектируется (B1-фикс) | конкурентная инъекция (host-симуляция ISR) | host |
@@ -518,9 +531,9 @@ flowchart TD
 | T14 | test_kernel | Стартап: ResetCause прочитан → reset_cause-событие первым | FakeResetCause + init + assert order | host |
 | T15 | test_kernel | ISR-граница: tim2 TU не вызывает kernel/watchdog/events (нет эмиссии и reload из ISR-пути) | include-lint (#51 §5.2) + nm-проверка символов tim2_clock.o (нет ссылок на kernel/watchdog) | host |
 | T16 | target | Bounded steps под combined load на L4 (obs #8) | L4 сценарий (#52 §6.3, observed maxima) | L4 |
-| T17 | test_kernel | INV-SENSING-FRESH при worst-case backlog: 64 due-шага по ~T_step → safety->tick исполняется между каждым шагом, интервал между tick ≤ T_step (не зависит от размера очереди) | schedule 64 шага (каждый продвигает TestTimeSource на ~T_step), 64× process_tick(), FakeSafety::interval_max ≤ T_step, T_check_jitter/T_arb ≤ 1 шаг | host |
+| T17 | test_kernel | INV-SENSING-FRESH при worst-case backlog: 64 due-шага по ~T_step → safety->tick исполняется между каждым шагом, интервал между tick ≤ шаг + слот (≈21 ms, не зависит от размера очереди); интервал от события до начала проверки ≤ 1 шаг | schedule 64 шага (каждый продвигает TestTimeSource на ~T_step), 64× process_tick(), FakeSafety::interval_max ≤ шаг+слот, T_check_jitter/T_arb ≤ 1 шаг | host |
 
-Свойства (RapidCheck, #52 property): для любого порядка schedule/deadline ≤ MaxSteps - инварианты bounded (count ≤ MaxSteps, шаги не теряются, переполнение наблюдаемо, ≤ 1 шаг за тик); для любого бэклога очереди (0..MaxSteps) - safety-граница вызывается на каждой границе шага, интервал между вызовами ≤ T_step (INV-SENSING-FRESH).
+Свойства (RapidCheck, #52 property): для любого порядка schedule/deadline ≤ MaxSteps - инварианты bounded (count ≤ MaxSteps, шаги не теряются, переполнение наблюдаемо, ≤ 1 шаг за тик); для любого бэклога очереди (0..MaxSteps) - safety-граница вызывается на каждой границе шага, интервал между вызовами ≤ шаг + слот + тик (не зависит от бэклога, INV-SENSING-FRESH).
 
 ## 8. Vertical slice граница (#70)
 
