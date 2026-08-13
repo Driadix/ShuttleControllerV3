@@ -1,0 +1,81 @@
+# bridge-relay: L4 bench UART relay (ticket #73)
+
+Test firmware for the L4 sensor bench. Runs on the **LilyGo T-Display S3**
+(ESP32-S3) that the bench owner wired to XT22 (`UART_ESP32`) in place of a
+USB-UART converter: the controller's network_bridge UART (230400 8E1, V1
+display profile) arrives on Serial1 (RX=21, TX=16 - pins taken from the
+reference ShuttleDisplay firmware) and is relayed to USB CDC (COM9).
+
+This is **bench tooling only, not production firmware**. It has no business
+logic and never drives actuators or writes sensor configuration; it only
+relays the stream, polls for telemetry, and renders a status panel.
+
+## What it does
+
+- Raw byte relay: every byte received on Serial1 is written to USB CDC, so
+  the host sees the controller stream (verified: 100% frames CRC-valid).
+  TX from the relay is limited to the request polling below; no other
+  host bytes ever enter the controller.
+- Request polling: SENSORS (MSG_REQ_SENSORS) and AS5600_HEALTH
+  (MSG_REQ_AS5600_HEALTH) are pushed only on request, so the relay
+  alternates CRC-correct request frames (targetID=0, empty payload)
+  every 500 ms over Serial1 TX.
+- Status panel: MSG_SENSORS (distances + per-role validity) and
+  MSG_AS5600_HEALTH (angle, flags, consecutive fail/succ) are rendered as
+  a stable panel on the ST7789 170x320 display - AS5600 line plus one line
+  per ToF role (ChR/ChF/PlR/PlF with mm or `invalid` when the role's VALID
+  bit is clear). Log frames stay on the COM channel only. Rows are cached:
+  only changed rows are redrawn, so the panel does not flicker while
+  counters update.
+
+Header shows baud, raw RX byte count and parsed MSG_LOG count.
+
+Panel power sequencing mirrors the reference `setupDisplay()`: `PIN_POWER_ON`
+(GPIO15) HIGH after 100 ms, then backlight (GPIO38), then `tft.init()`.
+
+## Build and upload
+
+Platform: pioarduino platform-espressif32 55.03.37 (Python 3.10-3.13;
+system Python 3.14 is NOT supported - use `.venv-pio312`).
+
+```bash
+# one-time: Python 3.11 (uv) virtualenv with PlatformIO
+python -m venv .venv-pio312        # from a 3.10-3.13 interpreter
+.venv-pio312/Scripts/python.exe -m pip install platformio
+
+# build and flash (ESP32-S3 native USB CDC appears as COM9)
+.venv-pio312/Scripts/python.exe -m platformio run -t upload --upload-port COM9
+```
+
+## Reading the stream
+
+```bash
+python tools/capture.py COM9 20
+```
+
+Decodes and prints: raw byte count, frame count with CRC pass/fail, per-msgID
+counts, MSG_LOG text, and named `As5600HealthPacket` (MSG 0x09) decode.
+Requires `pyserial`.
+
+## Wiring (XT22 -> T-Display S3)
+
+| XT22 pin | Net        | T-Display S3 | Notes                    |
+|----------|------------|--------------|--------------------------|
+| 3        | Esp32 TX   | GPIO21 (RX1) | controller TX -> display |
+| 4        | Esp32 RX   | GPIO16 (TX1) | display TX -> controller |
+| 5        | GNDREF     | GND          |                          |
+| 6        | 5V         | 5V/VBUS      | powers isolated side     |
+
+`RX1_PIN`/`TX1_PIN` in `src/main.cpp` mirror the reference ShuttleDisplay
+defines. If the display is wired elsewhere, change these two defines.
+
+## Gotchas
+
+- ST-Link V2 has no VCP - it cannot serve as the log channel. The display
+  relay is the log path for this bench.
+- Do not add `Serial.println`/host->controller echo to `loop()`: the CDC
+  channel must stay a clean raw relay or frame parsers (host-side
+  `tools/capture.py`, controller-side parser) see polluted streams.
+- A corrupted `length` byte in a frame (UART noise) is rejected before
+  buffering: the parser bounds `frameLen` to the canonical 128-byte max
+  frame size.
