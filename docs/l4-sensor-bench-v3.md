@@ -14,7 +14,7 @@
 | ST-Link | V2 | XT21 (SWD) | подключен, probe PASS |
 | UART-путь | LilyGo T-Display S3 (ESP32-S3), relay-прошивка `bench/bridge-relay` | XT22 `UART_ESP32`, Serial1 RX=21/TX=16 | подключен, COM9 (USB CDC), capture PASS |
 | ToF | 2 шт, Waveshare B | Sensor8/Sensor4 (разъёмы равнозначны) | подключены, **0x09 (ChR) и 0x0C (PlF) отвечают, см. идентификацию** |
-| AS5600 | магнитный энкодер | XT28 `Encoder` | подключен, **responding + angle-valid** |
+| AS5600 | магнитный энкодер | XT28 `Encoder` | подключен, **responding + angle-valid, rotation подтверждён** |
 | Питание | двойное: ST-Link USB + USB-UART USB, оба с одного ПК | XT21 / XT22 | **gate: проверка напряжений, см. Power** |
 
 ## Аппаратный контракт
@@ -52,7 +52,7 @@ I2C-адрес не доказывает физическое подключен
 | 0x09 | channel reverse (ID1) | **PASS: отвечает**, dist 1500 mm (SENSORS VALID) |
 | 0x0A | channel forward (ID2) | **не наблюдался**: telemetry VALID clear, лог `TOF ID2 ... noack` |
 | 0x0B | pallet reverse (ID3) | **не наблюдался**: telemetry VALID clear, лог `TOF ID3 ... noack` |
-| 0x0C | pallet forward (ID4) | **PASS: отвечает**, dist ~132-140 mm |
+| 0x0C | pallet forward (ID4) | **PASS: отвечает**, dist меняется в наблюдениях ~132-225 mm |
 | 0x36 | AS5600 | XT28 `Encoder`, **PASS: responding + angle-valid + rotation** (boot: `Init encoder success`; health: fail=0, cSucc=255, flags RESP\|ANGLE; вращение магнита подтверждено владельцем на текущей прошивке, raw меняется) |
 
 Подключенные ToF стоят в разъёмах Sensor8/Sensor4 (разъёмы равнозначны, порядок не фиксируется; по решению владельца привязка адрес→разъём не требуется). Наблюдаемое: на шине отвечают модули с адресами 0x09 (ID1, роль channel reverse) и 0x0C (ID4, роль pallet forward) - этих двух адресов достаточно как bus identity по решению владельца (address-level identity); прошивка также опрашивает 0x0A/0x0B (роли channel forward/pallet reverse) и ответа нет, поэтому лог `TOF ID2/ID3 ... noack` и ошибка `0012` (FAULT_TOF_CH_F + FAULT_TOF_PAL_R) продолжаются. Идентичность модулей A/B по разъёмам не фиксируется (разъёмы равнозначны).
@@ -123,7 +123,7 @@ UART-путь network_bridge гальванически изолирован: PA
 | --- | --- | --- | --- |
 | ST-Link доступен | `openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "init; halt"` отвечает, IDCODE прочитан | проверить кабель XT21, питание 3.3V_1, драйвер ST-Link | **PASS**: STM32F405RG (id 0x100f6413), 3.3V_1 ≈ 3.17 V, halt/resume, PC меняется |
 | UART отвечает | на COM9 видны boot-логи/регулярные кадры | проверить TX/RX-ориентацию, уровни, GNDREF, прошивку relay | **PASS**: 135-171 кадров/20 с, CRC-valid 100% (исключая 1 кадр на reset), MSG_LOG расшифрован |
-| I2C scan | адреса 0x09..0x0C (ToF) и 0x36 (AS5600) отвечают | проверить питание 5V стороны, подтяжки, разъёмы | **частично**: отвечают 0x09 (ChR, 1500 mm) и 0x0C (PlF, ~132-140 mm) + AS5600; 0x0A/0x0B не наблюдались (VALID clear, лог noack) |
+| I2C scan | адреса 0x09..0x0C (ToF) и 0x36 (AS5600) отвечают | проверить питание 5V стороны, подтяжки, разъёмы | **частично**: отвечают 0x09 (ChR, 1500 mm) и 0x0C (PlF, dist меняется в наблюдениях ~132-225 mm) + AS5600; 0x0A/0x0B не наблюдались (VALID clear, лог noack) |
 | AS5600 | угол читается и меняется при вращении | проверить монтаж магнита, адрес 0x36 | **PASS**: читается (fail=0, cSucc=255, flags RESP\|ANGLE), вращение магнита подтверждено владельцем на текущей прошивке (raw меняется) |
 
 Текущая картина (2026-08-13): плата стабильно доступна через ST-Link и UART-путь (relay-дисплей COM9); AS5600 отвечает и реагирует на вращение; оба подключенных ToF идентифицированы на шине - 0x09 (channel reverse) и 0x0C (pallet forward), отвечают и дают расстояния. Ошибка `0012` (TOF_CH_F + TOF_PAL_R) продолжается, т.к. прошивка также опрашивает 0x0A/0x0B, ответа на которых нет.
