@@ -23,5 +23,8 @@ Thumbs.db
 .tmp/
 .lavish/
 
+# Operator-loop prototype demo output (ticket #60)
+out/
+
 # Windows reserved device name, created by `> nul` redirections in Git Bash
 nul

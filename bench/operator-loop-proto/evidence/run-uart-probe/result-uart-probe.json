@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "runner": "operator-loop-proto (PROTOTYPE, ticket #60)",
+  "scenario": {
+    "id": "uart-probe",
+    "schemaVersion": 1
+  },
+  "startedAt": "2026-08-13T10:25:58+00:00",
+  "board": {
+    "probe": "PASS",
+    "part": "STM32F405RG",
+    "idcode": "0x100f6413",
+    "uid": "002900363033470336363131"
+  },
+  "uart": {
+    "port": "COM9",
+    "open": true,
+    "bytes": 0
+  },
+  "firmware": {
+    "gitSha": "080c114edca72910d61b1836921fdddb98dd2bca",
+    "gitDescribe": "080c114",
+    "artifact": "firmware.bin",
+    "artifactSha256": "959e234ea70cef3950d6723a6225928a42128852537d081d7dc0fd76acd46e88"
+  },
+  "toolchain": {
+    "platformio": "PlatformIO Core, version 6.1.19"
+  },
+  "checklist": null,
+  "flash": null,
+  "capture": {
+    "rawPath": "bench\\operator-loop-proto\\evidence\\run-uart-probe\\raw-uart-probe.bin",
+    "rawBytes": 0,
+    "durationS": 20
+  },
+  "verdict": "TIMEOUT",
+  "reasons": [
+    "frames 0 < minFrames 1"
+  ],
+  "evidence": {
+    "complete": true,
+    "missing": [],
+    "resultPath": "bench/operator-loop-proto/evidence/run-uart-probe/result-uart-probe.json"
+  },
+  "normalized": {
+    "bytes": 0,
+    "framesValid": 0,
+    "framesBad": 0,
+    "msgCounts": {},
+    "logLines": []
+  },
+  "finishedAt": "2026-08-13T10:26:19+00:00"
+}
