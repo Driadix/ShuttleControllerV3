@@ -69,6 +69,8 @@ void process_tick();
 // must be in [now, now + StepBudgetMs]; stale or out-of-window deadlines are
 // rejected with DeadlineOutOfWindow (no silent success, rule R5). When the
 // queue is full the schedule_rejected event is emitted and QueueFull returned.
+// Precondition: init() must have been called first (design section 6:
+// schedule is not part of the startup path).
 ScheduleResult schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms);
 
 } // namespace kernel

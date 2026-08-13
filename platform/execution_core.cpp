@@ -93,6 +93,9 @@ ScheduleResult schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms)
 {
     if (!g_initialized)
     {
+        // Defensive guard: contract requires init() first (see API comment);
+        // no caller in the PR reaches this state. DeadlineOutOfWindow is the
+        // closest "request cannot be honored" outcome.
         return ScheduleResult::DeadlineOutOfWindow;
     }
     // Absolute deadline, modular forward interval (wrap-safe, INV-MONOTONIC):

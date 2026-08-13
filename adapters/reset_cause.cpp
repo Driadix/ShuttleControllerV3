@@ -1,7 +1,8 @@
 // Reset-cause adapter implementation (target-only, HAL/CMSIS). STM32F405:
 // RCC->CSR reset flags (IWDGRSTF, SFTRSTF, PINRSTF, PORRSTF, BORRSTF) are
 // latched across resets until cleared by RMVF. Priority matches the fault
-// model: power-on/brownout first, then watchdog, then software/external.
+// model: watchdog (crash record) first, then software/external, then
+// power-on/brownout (least diagnostic value at startup).
 #include "adapters/reset_cause.h"
 
 #ifdef ARDUINO
