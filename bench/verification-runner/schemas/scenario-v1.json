@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "scenario-v1.json",
+  "title": "Verification runner scenario v1",
+  "description": "Normative contract for a verification-runner scenario (issue #60, docs/verification-runner-design-v3.md). Executable validation: runner.validate_scenario (stdlib-only, owner decision).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "title", "type", "phase", "identity", "flash", "capture", "oracle"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "type": { "enum": ["behavior", "flash-verify"] },
+    "phase": { "enum": ["L4", "L5"] },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board"],
+      "properties": {
+        "board": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["part", "uid"],
+          "properties": {
+            "part": { "type": "string", "minLength": 1 },
+            "uid": { "type": "string", "pattern": "^[0-9a-fA-F]{24}$" }
+          }
+        }
+      }
+    },
+    "flash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "env": { "type": "string", "minLength": 1 }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port", "baud", "parity", "durationS", "maxBytes"],
+      "properties": {
+        "port": { "type": "string", "minLength": 1 },
+        "baud": { "type": "integer", "exclusiveMinimum": 0 },
+        "parity": { "enum": ["N", "E", "O"] },
+        "durationS": { "type": "number", "exclusiveMinimum": 0 },
+        "maxBytes": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minFrames", "maxCrcBadRatio", "requirePatterns", "forbidPatterns"],
+      "properties": {
+        "minFrames": { "type": "integer", "minimum": 0 },
+        "maxCrcBadRatio": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "requirePatterns": { "type": "array", "items": { "type": "string" } },
+        "forbidPatterns": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

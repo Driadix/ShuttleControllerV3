@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "flash-boot-smoke",
+  "title": "Flash verify: ST-Link flash + probe alive",
+  "type": "flash-verify",
+  "phase": "L4",
+  "identity": {
+    "board": {
+      "part": "STM32F405RG",
+      "uid": "002900363033470336363131"
+    }
+  },
+  "flash": { "required": true, "env": "firmware" },
+  "capture": {
+    "port": "auto",
+    "baud": 230400,
+    "parity": "E",
+    "durationS": 15,
+    "maxBytes": 2000000
+  },
+  "oracle": {
+    "minFrames": 0,
+    "maxCrcBadRatio": 1.0,
+    "requirePatterns": [],
+    "forbidPatterns": []
+  }
+}
