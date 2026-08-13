@@ -36,8 +36,8 @@ flowchart LR
     EC -->|"WatchdogPort::reload"| WP
     MP --> TIM
     WP --> IWDG
-    EC -->|"KernelEvents (исходящий)"| OP
-    EC -->|"KernelEvents (Ф1: заглушка)"| RC
+    RC -->|"ResetCauseSource::read (стартап)"| EC
+    EC -->|"KernelEvents (Ф1: заглушка / Ф2: Producer)"| OP
 ```
 
 | Элемент | Компонент (#43 §2) | Владение | Примечание |
@@ -80,11 +80,13 @@ enum class ScheduleResult : std::uint8_t {
 //   2. deadline_ms - метка «не раньше» (release time), НЕ приоритет и НЕ переупорядочивание.
 //   3. Blocking head: пока head не due (now < head.deadline_ms), очередь ждёт -
 //      шаги за ним НЕ выполняются. Дедлайн обязан быть в окне [now, now + StepBudgetMs],
-//      поэтому блокировка головы ограничена одним тиком (≤ T_step).
+//      поэтому блокировка головы ограничена T_step (10 ms / 10 тиков).
 //   4. DeadlineOutOfWindow отклоняется на schedule: тихого успеха с невалидным дедлайном нет.
 //
 // Wrap-safe сравнение дедлайна (INV-MONOTONIC): поле uint32 хранит absolute-метку,
 // сравнение модулярное: static_cast<int32_t>(now_u32 - deadline_ms) < 0 => not due.
+// Та же модулярная арифметика в kernel::schedule: delta = int32(deadline_ms - now_u32),
+// валидно окно [0, StepBudgetMs]; stale (delta < 0) → DeadlineOutOfWindow (R5: нет тихого успеха).
 // Корректно, пока окно дедлайна ≤ 2^31 ms (у нас ≤ T_step); 64-bit поле не нужно (RAM-бюджет #10).
 //
 // Dispatch contract (production hardening, отличие от slice):
@@ -106,6 +108,8 @@ class StepRing {
     // Эмиссию событий и report_overrun выполняет kernel (владелец портов), не ring:
     // ring - чистый контейнер без зависимостей от domain/ports.h (R6).
     StepRunResult run_next(std::uint64_t now);
+    // deadline_ms - ABSOLUTE (хранится как есть; отличие от slice: slice хранил now+delta).
+    // Окно [now, now + StepBudgetMs] валидирует kernel::schedule перед вызовом; ring - capacity.
     ScheduleResult schedule(StepFn fn, void* ctx, std::uint32_t deadline_ms, std::uint64_t now);
     bool empty() const;
     std::uint32_t count() const;
@@ -155,7 +159,7 @@ namespace v3::watchdog {
 // domain/ports.h - исходящий порт ядра (foreground-only вызовы)
 struct KernelEvents {
     virtual void step_overrun(std::uint32_t step_ms) = 0;   // шаг > T_step (obs #8)
-    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // потеря ≥ 2 тиков (gap > 2×T_step); flash-окно НЕ через gap (§3.1)
+    virtual void scheduler_gap(std::uint64_t gap_ms) = 0;   // вход process_tick отложен > 2×StepBudgetMs (20 ms); flash-окно НЕ через gap (§3.1)
     virtual void schedule_rejected() = 0;                   // очередь шагов полна (obs #7)
     virtual void reset_cause(ResetCause cause) = 0;         // стартап: crash-запись через reboot (#49 §13)
 };
@@ -179,7 +183,7 @@ main loop (run, никогда не возвращается):
 process_tick():                      # foreground-only; НЕ ISR; максимум один шаг за тик
   now = time->now_ms()
   gap = now - last_tick              # в терминах продвижения тика, см. ниже
-  if gap > 2 * T_step: events->scheduler_gap(gap)   # потеря ≥ 2 тиков подряд
+  if gap > 2 * T_step: events->scheduler_gap(gap)   # вход отложен > 20 ms (2×T_step)
   last_tick = now
   if not ring.empty():
     r = ring.run_next(now)           # не более ОДНОГО due-шага (dispatch contract §2.1);
@@ -320,10 +324,10 @@ namespace v3 {
 namespace kernel {
 
 struct KernelConfig {
-    monotonic::TimeSource*   time;      // обязателен
-    watchdog::WatchdogPort*  hw;        // обязателен
-    KernelEvents*            events;    // обязателен (Ф1: заглушка, Ф2: Producer)
-    ResetCauseSource*        reset;     // обязателен
+    TimeSource*              time;      // domain/ports.h; обязателен (адаптер tim2)
+    WatchdogPort*            hw;        // domain/ports.h; обязателен (адаптер iwdg)
+    KernelEvents*            events;    // domain/ports.h; обязателен (Ф1: заглушка, Ф2: Producer)
+    ResetCauseSource*        reset;     // domain/ports.h; обязателен (адаптер reset_cause)
 };
 
 void init(const KernelConfig& cfg);       // стартап (foreground): reset-cause → events->reset_cause; порядок #43 §5
@@ -366,10 +370,16 @@ loop() → kernel::run()
 
 ```cpp
 // schedule - bounded insert (R1: no allocation); foreground; typed outcome (R5)
+// deadline_ms - АБСОЛЮТНАЯ метка monotonic (§2.1, release-time), НЕ delta:
+// окно [now, now + StepBudgetMs]; модулярный forward-интервал (wrap-safe, INV-MONOTONIC)
 ScheduleResult schedule(StepFn fn, void* ctx, uint32_t deadline_ms) {
-    if (deadline_ms > StepBudgetMs) return ScheduleResult::DeadlineOutOfWindow;  // окно [now, now + T_step]
+    uint64_t now = time->now_ms();
+    int32_t delta = static_cast<int32_t>(deadline_ms - static_cast<uint32_t>(now));
+    if (delta < 0 || delta > static_cast<int32_t>(StepBudgetMs)) {
+        return ScheduleResult::DeadlineOutOfWindow;   // stale (deadline в прошлом) или вне окна
+    }
     if (ring.count() >= MaxSteps) { events->schedule_rejected(); return ScheduleResult::QueueFull; }
-    return ring.schedule(fn, ctx, deadline_ms, time->now_ms());
+    return ring.schedule(fn, ctx, deadline_ms, now);  // ring хранит absolute deadline как есть
 }
 
 // process_tick - foreground-only, вызывается из run() (target) и тестами (host);
@@ -378,7 +388,7 @@ void process_tick() {
     if (!initialized) return;
     uint64_t now = time->now_ms();
     uint64_t gap = now >= last_tick ? now - last_tick : 0;      // NTP-скок: clamp (INV-MONOTONIC)
-    if (gap > 2 * StepBudgetMs) events->scheduler_gap(gap);     // потеря ≥ 2 тиков; полнобюджетный шаг (≤10 ms) - не событие
+    if (gap > 2 * StepBudgetMs) events->scheduler_gap(gap);     // вход отложен > 20 ms (2×T_step); полнобюджетный шаг (≤10 ms) - не событие
     last_tick = now;
     if (!ring.empty()) {
         StepRing::StepRunResult r = ring.run_next(now);         // один due-шаг; blocked head - не выполняется (≤ T_step)
@@ -455,7 +465,7 @@ flowchart TD
 | T2 | test_kernel | FIFO-порядок + «не раньше»: шаги выполняются в порядке schedule; blocked head (deadline в будущем) останавливает очередь, последующие шаги не выполняются до due | шаги с разными deadline, инъекция времени, assert порядка и блокировки | host |
 | T3 | test_kernel | Один шаг за тик: N due-шагов выполняются за N тиков (dispatch contract §2.1) | schedule N=5, 5× process_tick(), assert 1 шаг/тик | host |
 | T4 | test_kernel | MaxSteps=64; 65-й schedule → QueueFull + schedule_rejected | заполнение ring, assert | host |
-| T5 | test_kernel | DeadlineOutOfWindow: deadline > T_step → отклонён, в очередь не попадает | schedule(deadline=T_step+1) × N, assert результат + очередь | host |
+| T5 | test_kernel | DeadlineOutOfWindow: stale (deadline < now) и out-of-window (now + T_step + 1) отклоняются; граница now + T_step и wrap uint32 (now близко к 2^32) валидны | schedule(absolute deadline) с инъекцией now у границ, assert результат + очередь | host |
 | T6 | test_kernel | Idle reload: пустая очередь → watchdog.reload вызван каждый тик | FakeWatchdog::reload_count | host |
 | T7 | test_kernel | scheduler_gap при потере ≥ 2 тиков подряд (gap > 2×T_step); полнобюджетный шаг (≤ T_step) НЕ даёт события | time jump на > 2×T_step и на ровно T_step, assert events | host |
 | T8 | test_monotonic | wrap-safe: 64-bit перенос не ломает now_ms | инъекция больших значений | host |
@@ -465,7 +475,7 @@ flowchart TD
 | T12 | test_watchdog | reload между двумя flash-окнами подряд (W_flash 4 s × 2 > 6.8 s) | note_flash_window + reload-check | host |
 | T13 | test_events | RecordingEvents фиксирует step_overrun/scheduler_gap/schedule_rejected/reset_cause | прямое эмитирование | host |
 | T14 | test_kernel | Стартап: ResetCause прочитан → reset_cause-событие первым | FakeResetCause + init + assert order | host |
-| T15 | test_kernel | ISR-граница: эмиссия событий/reload невозможна из ISR-пути (отсутствие вызовов в tim2 ISR) | код-ревью + host-структурный тест | host |
+| T15 | test_kernel | ISR-граница: tim2 TU не вызывает kernel/watchdog/events (нет эмиссии и reload из ISR-пути) | include-lint (#51 §5.2) + nm-проверка символов tim2_clock.o (нет ссылок на kernel/watchdog) | host |
 | T16 | target | Bounded steps под combined load на L4 (obs #8) | L4 сценарий (#52 §6.3, observed maxima) | L4 |
 
 Свойства (RapidCheck, #52 property): для любого порядка schedule/deadline ≤ MaxSteps - инварианты bounded (count ≤ MaxSteps, шаги не теряются, переполнение наблюдаемо, ≤ 1 шаг за тик).
@@ -478,7 +488,7 @@ flowchart TD
 
 | Obligation (#43 §8 / #48 §11) | Закрытие в #70 |
 | --- | --- |
-| #5 watchdog под combined load | T11, T12 host + T16 L4 |
+| #5 watchdog под combined load | T11, T12 host + L5 acceptance #4 (#70: watchdog не ресетит под combined load) |
 | #8 bounded steps | T1-T3, T7, T15, T16 |
 | #9 NTP-скачок не ломает monotonic | T9 |
 | #10 RAM/stack/CPU margin | target build: link map, `.su`, high-water + L4 CPU-load (DWT CYCCNT занятость foreground за окно 1 s, test-прошивка; CPU ≤ 70% #48 §8) |
