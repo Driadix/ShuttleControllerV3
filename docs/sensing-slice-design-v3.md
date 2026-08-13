@@ -56,16 +56,18 @@ namespace v3 {
 
 enum class I2cResult : std::uint8_t {
     Ok = 0,          // транзакция завершена (STOP), данные валидны
-    Busy = 1,        // шина занята другим владельцем (BMS TX / radio audit, Фаза 2)
-    Stuck = 2,       // шина в недопустимом состоянии (BUSY/TIMEOUT/ERROR HAL)
-    Recovered = 3,   // после recover(): шина восстановлена
+    NoAck = 1,       // устройство не ответило (отсутствует/обесточено) - без recovery
+    Short = 2,       // read-фаза недопоставила - без recovery
+    Busy = 3,        // шина занята другим владельцем (BMS TX / radio audit, Фаза 2)
+    Stuck = 4,       // шина в недопустимом состоянии (HAL BUSY/TIMEOUT/ERROR) - recover()
+    Recovered = 5,   // после recover(): шина восстановлена
 };
 
 struct I2cPort {
     // Одна bounded транзакция: write reg, restart, read len (STOP в конце).
     // Никогда не блокирует дольше слота. Status-классификация V1
     // (TOF_Sense.cpp): noack (адрес/данные), short (недополучено),
-    // unknown (BUSY/TIMEOUT/ERROR - кандидат на recover()).
+    // stuck (BUSY/TIMEOUT/ERROR - кандидат на recover()).
     virtual I2cResult read(std::uint8_t device, std::uint8_t reg,
                            std::uint8_t* out, std::uint8_t len) = 0;
     // Reinit + <=16 SCL pulses + STOP + cooldown >=5 s (#48 §7, obligation
@@ -114,7 +116,7 @@ enum class HealthState : std::uint8_t {   // V1 keep (monitors)
 struct SensorSnapshot {
     std::uint32_t raw;            // ToF: distance mm (dis @0x24); AS5600: angle (RAW @0x0C)
     std::uint32_t raw2;           // ToF: signal_strength @0x2A; AS5600: ANGLE @0x0E (processed)
-    std::uint32_t sample_ms;      // monotonic момент успешного sample (0 = никогда)
+    std::uint64_t sample_ms;      // monotonic момент успешного sample (0 = никогда)
     std::uint32_t age_ms;         // now - sample_ms (0xFFFFFFFF если никогда)
     HealthState state;
     SensorFault fault;
@@ -148,9 +150,14 @@ struct SensingConfig {
 
 ### 3.1 Sensing-шаг (bounded, foreground)
 
+Домен framework-free (#43: dependencies inward): `SensingService` - чистая state machine, принимает `now` и возвращает следующий срок слота; планирование (kernel::schedule с deadline now+8) - обязанность composition root (`platform/main.cpp`), не домена.
+
 ```text
-sensing_step(ctx):                    # планируется kernel::schedule(deadline now+8)
-  now = monotonic::now_ms()
+sensing_step (composition root, platform/main.cpp):   # kernel::schedule(deadline now+8)
+  service->step(now)                # одна bounded транзакция (ToF) + AS5600 по периоду
+  kernel::schedule(sensing_step, ctx, now + service->next_step_ms())
+
+SensingService::step(now):         # domain, чистый C++ (stdint), без Arduino/platform
   # ToF round-robin: один слот, следующее устройство
   idx = rr_index % 4                  # 0..3 -> SensorId 0..3 (ToF ID 1..4)
   rr_index++
@@ -159,7 +166,7 @@ sensing_step(ctx):                    # планируется kernel::schedule(
     dis = le32(buf+4); sig = le16(buf+10)
     record_success(idx, now, dis, sig)
   elif status == Stuck:
-    schedule_recovery()               # cooldown-механика, WARN_I2C_RECOVERY
+    schedule_recovery(now)            # cooldown-механика, WARN_I2C_RECOVERY
     record_failure(idx, now, SensorFault::BusStuck)
   else:                               # Busy | Recovered | short | unknown
     record_failure(idx, now, classify(status))          # NoAck/Stale-класс
@@ -171,7 +178,8 @@ sensing_step(ctx):                    # планируется kernel::schedule(
     status_b = i2c->read(0x36, 0x0E, buf2b, 2)         # ANGLE (processed)
     raw_b = (buf2b[0] << 8 | buf2b[1]) & 0x0FFF
     record_success/failure(As5600, now, raw_a, raw_b, status_a)
-  kernel::schedule(sensing_step, this, now + tof_slot_ms)   # self-reschedule
+  refresh_freshness(now)
+  m_next_step_ms = tof_slot_ms        # следующий слот через 8 ms (читается glue)
 ```text
 
 - **Big-endian AS5600** (контракт владельца, прототип): `(b[0] << 8 | b[1]) & 0x0FFF`; `le16()` НЕ применять (byte-swap портит угол). RAW ANGLE @0x0C/0x0D и ANGLE @0x0E/0x0F оба валидны; первичный - RAW.
@@ -227,8 +235,9 @@ schedule_recovery():
 
 | Модуль | Зависит от | НЕ зависит от |
 | --- | --- | --- |
-| `domain/sensing.h/.cpp` | `domain/ports.h` (I2cPort), `platform/monotonic.h` (now_ms), `platform/execution_core.h` (kernel::schedule) | Arduino Core, адаптеров |
+| `domain/sensing.h/.cpp` | `domain/ports.h` (I2cPort) | Arduino Core, platform/ (kernel, monotonic - glue передаёт now), адаптеров |
 | `adapters/i2c_*` | Arduino Core (Wire), реализует v3::I2cPort | domain (кроме порта) |
+| `platform/main.cpp` (glue) | kernel::schedule, monotonic, SensingService, I2cPort | — |
 
 Enforcement: include-lint (#51 §5.2) - никаких Arduino/RTOS-заголовков в `domain/`; native-сборка домена без framework (build_src_filter уже разделяет).
 
@@ -273,17 +282,20 @@ bench/
 ```cpp
 namespace v3::sensing {
 
-// Старт acquisition (foreground, после kernel::init): инициализация
-// расписания и первый self-schedule.
-void init(const SensingConfig& cfg, v3::I2cPort& i2c);
+// Старт acquisition (foreground, после kernel::init): сброс снапшотов и
+// расписания. i2c - реализация v3::I2cPort (адаптер); владелец - glue.
+void init(SensingService* svc, const SensingConfig& cfg, v3::I2cPort& i2c);
 
-// Bounded шаг (указатель для kernel::schedule): один ToF-слот + AS5600 по
-// периоду, обновление снапшотов/freshness, self-reschedule.
-void step(void* ctx);
+// Bounded шаг (вызывается composition root из kernel-шага): один ToF-слот +
+// AS5600 по периоду, обновление снапшотов/freshness/recovery-координация.
+void step(std::uint64_t now);
+
+// Срок следующего слота (для перепланирования glue): tof_slot_ms.
+std::uint32_t next_step_ms() const;
 
 // Snapshot-запросы (foreground; потребители: Safety Authority #71,
 // Observability #72). fixed-width out-параметры, без аллокаций.
-bool get_snapshot(SensorId id, SensorSnapshot* out);
+bool get_snapshot(SensorId id, SensorSnapshot* out) const;
 std::uint32_t recovery_count() const;
 
 }
@@ -294,12 +306,13 @@ std::uint32_t recovery_count() const;
 ```text
 loop() -> kernel::run() -> process_tick()
   └─ ring.run_next(now)                    # один bounded шаг за тик
-     └─ sensing::step(ctx)                 # self-scheduled, deadline now+8
-        ├─ i2c->read(tof_addr, 0x20, buf, 13)      # ~1.5 ms
-        ├─ (если AS5600 due) i2c->read(0x36, ...)  # ~1 ms
-        ├─ record_success/failure -> snapshot update
-        ├─ freshness-check по всем сенсорам
-        └─ kernel::schedule(step, ctx, now + 8)    # self-reschedule
+     └─ sensing_tick(ctx)                  # glue (main.cpp): deadline now+8
+        ├─ service->step(now)              # domain, framework-free
+        │  ├─ i2c->read(tof_addr, 0x20, buf, 13)      # ~1.5 ms
+        │  ├─ (если AS5600 due) i2c->read(0x36, ...)  # ~1 ms
+        │  ├─ record_success/failure -> snapshot update
+        │  └─ refresh_freshness(now)
+        └─ kernel::schedule(sensing_tick, ctx, now + service->next_step_ms())
   ├─ (если overrun) events->step_overrun(dt_ms)
   ├─ safety->tick(now)                     # SafetySlot (#70; Ф1 stub)
   └─ watchdog.reload()
@@ -308,14 +321,13 @@ loop() -> kernel::run() -> process_tick()
 ## 6. Light-визуализации (псевдокод)
 
 ```cpp
-// Планирование: bounded self-schedule с периодом ToF-слота (в окне kernel).
-void step(void* ctx)
+// Домен: чистый state machine (framework-free). now приходит из glue.
+void SensingService::step(std::uint64_t now)
 {
-    const std::uint64_t now = monotonic::now_ms();
-    const std::uint8_t idx = g_rr_index++ % 4U;
+    const std::uint8_t idx = m_rr_index++ % 4U;
 
     std::uint8_t buf[13] = {};
-    const I2cResult r = g_i2c->read(kTofBaseAddr + idx + 1U, 0x20U, buf, 13U);
+    const I2cResult r = m_i2c->read(kTofBaseAddr + idx + 1U, 0x20U, buf, 13U);
     if (r == I2cResult::Ok)
     {
         const std::uint32_t dis = le32(buf + 4U);
@@ -328,15 +340,15 @@ void step(void* ctx)
         if (r == I2cResult::Stuck) { schedule_recovery(now); }
     }
 
-    if (now >= g_next_as5600_ms)
+    if (now >= m_next_as5600_ms)
     {
-        g_next_as5600_ms = now + g_cfg.as5600_service_ms;
+        m_next_as5600_ms = now + m_cfg.as5600_service_ms;
         std::uint8_t b2[2] = {};
-        const I2cResult ra = g_i2c->read(kAs5600Addr, 0x0CU, b2, 2U);
+        const I2cResult ra = m_i2c->read(kAs5600Addr, 0x0CU, b2, 2U);
         const std::uint32_t raw_a = ra == I2cResult::Ok
             ? (static_cast<std::uint32_t>((b2[0] << 8) | b2[1]) & 0x0FFFU) : 0U;
         std::uint8_t b3[2] = {};
-        const I2cResult rb = g_i2c->read(kAs5600Addr, 0x0EU, b3, 2U);
+        const I2cResult rb = m_i2c->read(kAs5600Addr, 0x0EU, b3, 2U);
         const std::uint32_t raw_b = rb == I2cResult::Ok
             ? (static_cast<std::uint32_t>((b3[0] << 8) | b3[1]) & 0x0FFFU) : 0U;
         if (ra == I2cResult::Ok)
@@ -351,7 +363,17 @@ void step(void* ctx)
     }
 
     refresh_freshness(now);   // stale -> Degraded/Faulted (V1, §3.2)
-    kernel::schedule(&step, this, static_cast<std::uint32_t>(now) + g_cfg.tof_slot_ms);
+    m_next_step_ms = m_cfg.tof_slot_ms;
+}
+
+// Composition root (platform/main.cpp): планирует доменный шаг в kernel.
+void sensing_tick(void* ctx)
+{
+    auto* svc = static_cast<v3::sensing::SensingService*>(ctx);
+    const std::uint64_t now = v3::monotonic::now_ms();
+    svc->step(now);
+    v3::kernel::schedule(&sensing_tick, ctx,
+                         static_cast<std::uint32_t>(now) + svc->next_step_ms());
 }
 ```text
 
@@ -394,6 +416,7 @@ flowchart TD
 | T5 | test_sensing | AS5600 stale 1 s -> Faulted (age >= 1000) | инъекция времени, assert | host |
 | T6 | test_sensing | NoAck x3 -> Faulted (threshold, V1); 2 failures -> Degraded | FakeI2cPort scripted noack, assert | host |
 | T7 | test_sensing | Recovery: Faulted -> 3 consecutive successes -> Healthy (через Recovering) | scripted fail x3, ok x3, assert state path | host |
+| T7a | test_sensing | Промежуточные переходы: fail 1 -> Degraded, fail 3 -> Faulted, 1-й успех после Faulted -> Recovering | scripted fail/ok, assert states | host |
 | T8 | test_sensing | Stuck -> schedule_recovery: cooldown ≥5 s (вторая попытка <5 s пропущена); recover() вызван с bounded частотой | FakeI2cPort stuck + time advance, assert calls | host |
 | T9 | test_sensing | recover() -> Recovered: recovery_count++, WARN_I2C_RECOVERY типизирован | FakeI2cPort recover, assert | host |
 | T10 | test_sensing | AS5600 big-endian: bytes [0x12, 0x34] -> raw 0x1234 (не 0x3412) | FakeI2cPort bytes, assert raw | host |

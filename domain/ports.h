@@ -46,23 +46,6 @@ struct UartPort
     virtual std::uint32_t rx_drain(std::uint8_t* out, std::uint32_t budget) = 0;
 };
 
-// I2C adapter: one slot schedule owner (Sensing Service), bus-busy events from
-// the BMS adapter; recovery <= 16 SCL pulses + cooldown >= 5 s (obligation #14).
-struct I2cPort
-{
-    enum class Result : std::uint8_t
-    {
-        Ok = 0,
-        Busy = 1, // BMS TX window or radio audit
-        Stuck = 2,
-        Recovered = 3,
-    };
-
-    // One bounded transaction; never blocks longer than the slot.
-    virtual Result read(std::uint8_t device, std::uint8_t reg, std::uint8_t* out, std::uint8_t len) = 0;
-    virtual Result recover() = 0; // reinit + <= 16 SCL pulses + cooldown
-};
-
 // Flash persistence adapter (journal, sector 7, 128 KB, 512 B pages).
 // Quiescence C6: save window <= 4 s; single atomic blocking window.
 struct FlashPort
@@ -146,6 +129,36 @@ struct KernelEvents
 struct SafetySlot
 {
     virtual void tick(std::uint64_t now) = 0; // called by the execution core on every step boundary, foreground only
+};
+
+// I2C adapter (sensing slice #63, design docs/sensing-slice-design-v3.md):
+// one slot-schedule owner - the Sensing Service; Busy is reserved for the BMS
+// TX window / radio audit (Phase 2, #48 section 7). Recovery: reinit + <= 16
+// SCL pulses + cooldown >= 5 s (obligation #14). Production form of the
+// former slice::I2cPort (no callers existed; clean cutover, #85 decision).
+// Status classification follows V1 TOF_Sense.cpp: noack (address/data),
+// short (under-read), stuck (HAL BUSY/TIMEOUT/ERROR - recover candidate).
+enum class I2cResult : std::uint8_t
+{
+    Ok = 0,        // transaction completed (STOP), data valid
+    NoAck = 1,     // device did not acknowledge (absent/unpowered) - no recovery
+    Short = 2,     // read phase under-delivered - no recovery
+    Busy = 3,      // bus held by another owner (BMS TX / radio audit, Phase 2)
+    Stuck = 4,     // bus in an invalid state (HAL BUSY/TIMEOUT/ERROR) - recover()
+    Recovered = 5, // after recover(): bus re-initialized
+};
+
+struct I2cPort
+{
+    // One bounded transaction: write reg, restart, read len (STOP at the end).
+    // Never blocks longer than the slot (<= T_step).
+    virtual I2cResult read(std::uint8_t device, std::uint8_t reg,
+                           std::uint8_t* out, std::uint8_t len) = 0;
+    // Reinit + <= 16 SCL pulses + STOP + cooldown (issue #48 section 7,
+    // obligation #14). Called only by the Sensing Service, foreground only.
+    virtual I2cResult recover() = 0;
+    // Raw last Wire/HAL status of the last transaction (diagnostics/evidence).
+    virtual std::uint8_t last_wire_status() const = 0;
 };
 
 } // namespace v3
