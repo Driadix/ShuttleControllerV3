@@ -1,25 +1,37 @@
-// Watchdog policy (issue #43 section 4, #48 section 3): reload owned by the
-// execution core at every bounded step boundary and in the idle loop.
-// Target: real IWDG, 10 s window (IWatchdog.begin(10000000), hardware range
-// 6.8-18.8 s across LSI tolerance - budget reloads on the fast 6.8 s end).
-// Host: simulated against the injected virtual clock (starvation test F5).
+// Watchdog reload policy (design docs/execution-foundation-design-v3.md
+// section 2.3, 4.1). Reload is owned by the execution core: called at every
+// bounded step boundary and in the idle loop, always from the foreground
+// (INV-WATCHDOG-ARMED, issue #43 section 4, #48 section 3). The hardware IWDG
+// lives in adapters/iwdg_watchdog; this policy has no Arduino code and no ISR.
+//
+// Window model: IWDG 10 s nominal, hardware range 6.8-18.8 s across LSI
+// tolerance; budgets reload on the fast 6.8 s end (issue #48 section 3).
 #pragma once
 
 #include <cstdint>
 
-namespace slice
+#include "domain/ports.h"
+
+namespace v3
 {
 namespace watchdog
 {
 
-void init();
-void reload();
-void report_overrun(std::uint64_t step_ms); // step overrun (obligation #8)
+// Arms the IWDG (10 s, adapter) and starts the reload model.
+void init(WatchdogPort& hw);
 
-// Host observables (starvation simulation).
-std::uint64_t last_reload_ms(); // virtual-clock time of last reload
-std::uint64_t max_stall_ms();   // worst reload gap observed
-bool starved();                 // now - last_reload >= hardware window
+// Reloads the IWDG. Called only by the execution core, only from foreground.
+void reload();
+
+// Marks the start of a flash window (W_flash ~ 4 s, blocking). Ensures a
+// reload between consecutive flash windows: two windows back-to-back
+// (~ 8 s) exceed the 6.8 s fast end, so a reload is issued before the window
+// when needed (issue #48 section 3).
+void note_flash_window();
+
+// Step overrun (step > T_step): on target the hardware IWDG is the backstop
+// (no-op here); the starvation model lives in the host fake (test_watchdog).
+void report_overrun(std::uint32_t step_ms);
 
 } // namespace watchdog
-} // namespace slice
+} // namespace v3

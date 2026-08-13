@@ -1,117 +1,70 @@
+// Watchdog policy implementation (design section 2.3). Single implementation
+// for host and target: the hardware is behind WatchdogPort; the flash-window
+// reload model is deterministic against monotonic::now_ms().
 #include "platform/watchdog_policy.h"
-
-#include <cstdint>
 
 #include "platform/monotonic.h"
 
-#ifdef ARDUINO
-
-// Target leg: STM32duino IWDG (IWatchdog). Nominal 10 s window at 32 kHz LSI;
-// hardware range 6.8-18.8 s across LSI tolerance (issue #48 section 3).
-// Reload is called by the execution core; a missed reload for longer than the
-// fast-end window (6.8 s) causes a hardware reset.
-#include "IWatchdog.h"
-
-namespace slice
+namespace v3
 {
 namespace watchdog
 {
 namespace
 {
 
-std::uint64_t g_max_stall_ms = 0;
+// Fast LSI end of the IWDG window (issue #48 section 3): 6.8 s.
+constexpr std::uint64_t kFastEndMs = 6'800;
+
+// Flash persistence window (quiescence C6, issue #48 section 3): ~4.013 s.
+constexpr std::uint64_t kFlashWindowMs = 4'013;
+
+WatchdogPort* g_hw = nullptr;
 std::uint64_t g_last_reload_ms = 0;
-bool g_armed = false;
 
 } // namespace
 
-void init()
+void init(WatchdogPort& hw)
 {
-    IWatchdog.begin(10'000'000); // 10 s nominal (us units, issue #48 section 3)
+    g_hw = &hw;
+    g_hw->init(10'000'000); // IWDG 10 s nominal (us units)
     g_last_reload_ms = monotonic::now_ms();
-    g_armed = true;
 }
 
 void reload()
 {
-    if (!g_armed)
+    if (g_hw == nullptr)
     {
         return;
     }
-    IWatchdog.reload();
-    const std::uint64_t now = monotonic::now_ms();
-    const std::uint64_t stall = now - g_last_reload_ms;
-    if (stall > g_max_stall_ms)
-    {
-        g_max_stall_ms = stall;
-    }
-    g_last_reload_ms = now;
-}
-
-void report_overrun(std::uint64_t) {} // hardware IWDG is the backstop
-
-std::uint64_t last_reload_ms() { return g_last_reload_ms; }
-std::uint64_t max_stall_ms() { return g_max_stall_ms; }
-bool starved() { return (monotonic::now_ms() - g_last_reload_ms) >= 6'800; }
-
-} // namespace watchdog
-} // namespace slice
-
-#else
-
-// Host leg: simulated watchdog against the injected virtual clock.
-// Hardware window modelled on the fast LSI end: 6.8 s (issue #48 section 3).
-namespace slice
-{
-namespace watchdog
-{
-namespace
-{
-
-std::uint64_t g_last_reload_ms = 0;
-std::uint64_t g_max_stall_ms = 0;
-bool g_armed = false;
-
-constexpr std::uint64_t kWindowFastEndMs = 6'800; // 6.8 s @ 47 kHz LSI
-
-} // namespace
-
-void init()
-{
+    g_hw->reload();
     g_last_reload_ms = monotonic::now_ms();
-    g_max_stall_ms = 0;
-    g_armed = true;
 }
 
-void reload()
+void note_flash_window()
 {
-    if (!g_armed)
+    if (g_hw == nullptr)
     {
         return;
     }
+    // A flash window (blocking, ~W_flash) plus the time already elapsed since
+    // the last reload must stay inside the 6.8 s fast end. If not, reload now
+    // (still foreground, before the blocking window) - this is the mandatory
+    // reload between consecutive flash windows (two windows back-to-back are
+    // ~8 s > 6.8 s, issue #48 section 3).
     const std::uint64_t now = monotonic::now_ms();
-    const std::uint64_t stall = now - g_last_reload_ms;
-    if (stall > g_max_stall_ms)
+    if ((now - g_last_reload_ms) + kFlashWindowMs > kFastEndMs)
     {
-        g_max_stall_ms = stall;
+        g_hw->reload();
+        g_last_reload_ms = now;
     }
-    g_last_reload_ms = now;
 }
 
-void report_overrun(std::uint64_t step_ms)
+void report_overrun(std::uint32_t step_ms)
 {
-    // Host model: starvation is driven by tick gaps (the F5 test stops driving
-    // on_tick), so a step overrun does not itself advance the window. The
-    // overrun is observable via max_step_duration_ms() (obligation #8); on the
-    // target the IWDG backstop enforces the hardware window instead.
+    // Target: hardware IWDG is the backstop; nothing to do here. Host: the
+    // starvation model lives in the test WatchdogPort fake (test_watchdog).
     (void)step_ms;
 }
 
-std::uint64_t last_reload_ms() { return g_last_reload_ms; }
-std::uint64_t max_stall_ms() { return g_max_stall_ms; }
-bool starved() { return (monotonic::now_ms() - g_last_reload_ms) >= kWindowFastEndMs; }
-
 } // namespace watchdog
-} // namespace slice
-
-#endif
+} // namespace v3

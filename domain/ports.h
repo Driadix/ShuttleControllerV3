@@ -10,20 +10,6 @@
 namespace slice
 {
 
-// Monotonic clock, 1 ms tick, wrap-safe. Single writer: the execution core.
-struct Monotonic
-{
-    // Returns the current monotonic time in ms since power-up/reset.
-    virtual std::uint64_t now_ms() const = 0;
-};
-
-// Watchdog contract: reload is owned by the execution core at every bounded
-// step boundary and in the idle loop (issue #43 section 4, #48 section 3).
-struct Watchdog
-{
-    virtual void reload() = 0;
-};
-
 // CAN adapter (issue #43 section 4): bounded TX (<= 16 frames/tick), bounded
 // RX drain (<= 64 frames/tick), force-stop on a dedicated mailbox with the
 // minimum extended ID, outside all queues.
@@ -103,3 +89,63 @@ struct ObservabilityPort
 };
 
 } // namespace slice
+
+// ---------------------------------------------------------------------------
+// Production ports (design docs/execution-foundation-design-v3.md section 4.2).
+// Implemented by adapters (adapters/); the platform policy and the domain core
+// depend on these interfaces only. All calls are foreground-only, never from
+// an ISR (rule R2, issue #43 section 3.2).
+// ---------------------------------------------------------------------------
+namespace v3
+{
+
+// Monotonic tick source: implemented by adapters/tim2_clock. The adapter owns
+// the 64-bit aggregation and the DWT CYCCNT seqlock; policy delegates
+// (platform/monotonic.h has no Arduino/TIM2 code).
+struct TimeSource
+{
+    virtual void init_tick() = 0;             // TIM2 1 ms, DWT enable (adapter)
+    virtual std::uint64_t raw_now_ms() = 0;   // 64-bit aggregated tick (adapter keeps 64-bit)
+    virtual std::uint64_t raw_ticks_us() = 0; // CYCCNT-derived, wrap-safe
+};
+
+// Watchdog hardware: implemented by adapters/iwdg_watchdog.
+struct WatchdogPort
+{
+    virtual void init(std::uint32_t window_us) = 0; // IWDG 10 s
+    virtual void reload() = 0;
+};
+
+// Reset-cause: implemented by adapters/reset_cause. Read once at startup.
+enum class ResetCause : std::uint8_t
+{
+    PowerOn = 0,
+    Watchdog = 1,
+    Software = 2,
+    External = 3,
+    Unknown = 4,
+};
+
+struct ResetCauseSource
+{
+    virtual ResetCause read() = 0; // called by the execution core at startup (foreground)
+};
+
+// Kernel event sink (outbound port, design section 2.4). Foreground-only calls.
+// Phase 1: stub (no-op diagnostic sink); Phase 2: Observability Producer (#72).
+struct KernelEvents
+{
+    virtual void step_overrun(std::uint32_t step_ms) = 0; // step > T_step (obs #8)
+    virtual void scheduler_gap(std::uint64_t gap_ms) = 0; // process_tick entry delayed > 3xT_step (30 ms)
+    virtual void schedule_rejected() = 0;                 // step queue full (obs #7)
+    virtual void reset_cause(ResetCause cause) = 0;       // startup crash record through reboot (#49 section 13)
+};
+
+// Mandatory safety boundary (design section 2.5): freshness-check + arbitration
+// on every step boundary, OUTSIDE the FIFO (INV-SENSING-FRESH, #48 section 4).
+struct SafetySlot
+{
+    virtual void tick(std::uint64_t now) = 0; // called by the execution core on every step boundary, foreground only
+};
+
+} // namespace v3
