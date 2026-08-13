@@ -10,7 +10,7 @@
 
 1. **Модель вердикта — единая**: `PASS / TIMEOUT / FAIL / INCOMPLETE`; полнота evidence и oracle в одном результате; `INCOMPLETE` — hard stop до физических операций (exit 3). Двухосевая альтернатива отклонена (избыточна для потребителей).
 2. **Board identity — idcode + part + 96-bit UID**: DBGMCU_IDCODE (0xE0042000) + UID (0x1FFF7A10) через OpenOCD; проверено на стенде (`0x100f6413` → STM32F405RG, UID `002900363033470336363131`).
-3. **Safety-checklist — внутри runner'а**: подпись владельца per-run, запись в evidence, жёсткий gate перед flash; без подписи — отказ без side effects (инвариант, найден в прототипе).
+3. **Safety-checklist — внутри runner'а**: подпись владельца per-run (интерактивно или пред-подписанный файл; авто-аттестация `--yes` — прототипный хук, в production НЕ входит), запись в evidence, жёсткий gate перед любым физическим взаимодействием (probe включительно, §3.1); без подписи — отказ без side effects (инвариант, найден в прототипе).
 4. **Наблюдаемость T16 — после observability/UART-слайса (#72/#75)**: Phase-1 kernel не эмитит событий на UART (KernelEvents stub no-op); L4 smoke доказывает живость kernel'а heartbeat'ом в production-потоке, а не временным диагностическим кодом. Gate 1→2 (#68) и закрытие #70 (T16) сдвигаются за #72/#75.
 5. **Живой representative flow — выполнен** (attestation физических проверок владельца, 2026-08-13): flash (идемпотентен, тот же kernel #70) + capture; результат — `bench/operator-loop-proto/evidence/`.
 
@@ -66,7 +66,8 @@ flowchart LR
 {
   "schemaVersion": 1,
   "id": "flash-boot-smoke",
-  "title": "Flash boot smoke: ST-Link flash + post-flash UART capture",
+  "title": "Flash verify: ST-Link flash + probe alive",
+  "type": "flash-verify",
   "phase": "L4",
   "flash": { "required": true, "env": "firmware" },
   "capture": {
@@ -88,6 +89,7 @@ flowchart LR
 | Поле | Семантика | Обязательность |
 | --- | --- | --- |
 | `id` | уникальный slug сценария; имя файла-артефактов | да |
+| `type` | `behavior` (PASS утверждает поведение: oracle обязан быть невакуумным) / `flash-verify` (PASS утверждает только flash + probe-alive + полноту evidence, НЕ поведение) | да |
 | `phase` | L4 / L5 (будущее) | да |
 | `flash.required` | false → шаг flash пропускается (например, uart-probe) | да |
 | `flash.env` | PlatformIO env для build+upload (`firmware`) | при required |
@@ -98,6 +100,14 @@ flowchart LR
 | `oracle.maxCrcBadRatio` | доля битых кадров; превышение → FAIL | да |
 | `oracle.requirePatterns` | regex на декодированные MSG_LOG строки; все обязаны встретиться, иначе TIMEOUT | нет |
 | `oracle.forbidPatterns` | regex; любое совпадение → FAIL | нет |
+
+**Правило невакуумности**: `behavior`-сценарий обязан иметь наблюдаемый
+позитив — `minFrames >= 1` или непустой `requirePatterns`; вакуумный oracle
+(`minFrames == 0` + пустые patterns) для `behavior` отклоняется
+schema-валидацией (runner не имеет веток, превращающих молчание в pass —
+scope #65). `flash-verify` допускает `minFrames: 0`: его PASS утверждает
+только «flash выполнен + плата жива по probe + evidence полон» и явно НЕ
+утверждает поведение прошивки (Phase-1 kernel молчит на UART — §10).
 
 Расширение (L5/CAN, #62): секция `measurement` (источники измерений, бюджеты, workload metadata) добавляется аддитивно, schemaVersion 2; обязательные acceptance #52 §6.3 (C1/T_fs/lease/watchdog/power-cut/CAN flood) выражаются как L5-сценарии с measurement-секцией, а не как UART-только.
 
@@ -130,7 +140,7 @@ flowchart LR
 }
 ```
 
-Примечание: oracle `minFrames: 0` (flash-boot-smoke) делает вердикт PASS при молчащем UART — это осознанно: Phase-1 kernel не эмитит событий на UART (§10 Unknown: наблюдаемость T16). Сценарии с требованиями к потоку (uart-probe, `minFrames: 1`) дают TIMEOUT на том же железе.
+Примечание: `flash-boot-smoke` — `type: flash-verify` (`minFrames: 0`): вердикт PASS на молчащем UART утверждает только «flash + probe-alive + evidence полон», НЕ поведение прошивки. Phase-1 kernel не эмитит событий на UART (§10); поведенческая проверка живости kernel'а — после observability/UART-слайса (#72/#75), сценарий `type: behavior` и heartbeat-паттерном.
 
 **Вердикты** (контракт с #52 §7.1: automated checks = evidence, не approval):
 
@@ -166,37 +176,45 @@ out/<scenario>-<timestamp>/
 
 ```
 run <scenario>:
-  # 1. Board identity (обязательное evidence)
-  board = probe()                      # OpenOCD: DBGMCU_IDCODE + UID
-  if probe FAIL: missing += boardIdentity      # отказ до любых операций
-  # 2. UART port (обязательное evidence)
-  uart = port_check()                  # open/close, baud 230400 8E1
-  if port closed: missing += uartPort
-  # 3. Checklist владельца (если scenario.flash.required)
+  # 0. Checklist владельца — ПЕРВЫЙ gate (если scenario.flash.required):
+  #    никакое физическое взаимодействие (probe включительно) не исполняется
+  #    до прохождения gate'ов (инвариант §4.2.2; найдено в прототипе:
+  #    отказ обязан блокировать физические операции, а не только вердикт)
   if flash.required:
     cl = load(checklist.json)          # подпись владельца per-run
     if not cl or not cl.signed: missing += checklist
-  # 4. FLASH — строго после gate: missing пуст (hard stop, инвариант)
+  # 1. Board identity — gated: probe только при пустом missing
+  if missing: board = SKIPPED; missing += boardIdentity
+  else: board = probe()                # OpenOCD: DBGMCU_IDCODE + UID
+        if probe FAIL: missing += boardIdentity
+  # 2. UART port (пассивная host-проверка; обязательное evidence)
+  uart = port_check()                  # open/close, baud 230400 8E1
+  if port closed: missing += uartPort
+  # 3. FLASH — строго после gate: missing пуст (hard stop, инвариант)
   if flash.required and not missing:
     flash()                            # pio run -e firmware -t upload (ST-Link)
   elif flash.required:
     record flash: {skipped: true, reason: missing}   # отказ без side effects
-  # 5. Identity firmware + toolchain (обязательное evidence)
+  # 4. Identity firmware + toolchain (обязательное evidence)
   firmware = git identity + artifact sha256
   toolchain = pio versions
   if no gitSha: missing += gitSha
   if no artifactSha256: missing += artifactSha256
-  # 6. Capture (bounded) + normalize
+  # 5. Capture (bounded) + normalize
   raw = capture(port, durationS)       # bounded read, maxBytes guard
   save raw-<scenario>.bin
   normalized = decode_frames(raw)      # CRC16-CCITT, resync, MSG_LOG text
-  # 7. Полнота + вердикт
+  # 6. Полнота + вердикт
   if missing: verdict = INCOMPLETE (exit 3)     # отказ
   else: verdict = oracle(normalized)            # PASS/TIMEOUT/FAIL
   write result-<scenario>.json
 ```
 
-Invariant (найден в прототипе #60): **никакая физическая операция не исполняется, пока evidence-gate'ы не пройдены** — отказ предшествует side effect'у, а не сопровождает его.
+Invariant (найден в прототипе #60): **никакое физическое взаимодействие с
+стендом (probe включительно) не исполняется, пока evidence-gate'ы не
+пройдены** — отказ предшествует side effect'у, а не сопровождает его.
+Standalone `detect` (без сценария) — read-only диагностика (транзиентный
+halt, без мутаций), вне прогонов gate'ом не обязывается.
 
 ### 3.2 Normalize (декодирование кадров)
 
@@ -213,6 +231,10 @@ if not all(requirePatterns in logLines):      -> TIMEOUT
 -> PASS
 ```
 
+Правило невакуумности (schema-валидация, §2.1): `behavior`-сценарий с
+`minFrames == 0` и пустыми `requirePatterns` — ошибка схемы, прогон не
+начинается. `flash-verify` — исключение, PASS без утверждения поведения.
+
 ## 4. Зависимости и контракты
 
 ### 4.1 Dependency matrix
@@ -228,9 +250,10 @@ Enforcement: runner — bench tooling в `bench/`, не входит в domain i
 ### 4.2 Evidence-контракт (инварианты)
 
 1. **Полнота**: `missing == []` — board identity, uart port, firmware SHA, artifact sha256, checklist (при flash), raw-артефакт записан.
-2. **Отказ при неполном наборе**: `INCOMPLETE`, exit 3; физические операции не исполнялись.
+2. **Отказ при неполном наборе**: `INCOMPLETE`, exit 3; никакое физическое взаимодействие со стендом (probe включительно) не исполнялось (порядок gate'ов §3.1).
 3. **Идентичность**: каждый прогон связывает board (idcode+UID), firmware (gitSha+sha256), toolchain (версии) с raw-артефактом и нормализованным результатом.
-4. **Никаких путей фейка**: simulation-хуки прототипа (`--fixture`, `--simulate-board`) в production контракт НЕ входят; evidence только с живых probe/capture. Сценарий не может превратить failed product behavior в pass (scope #65).
+4. **Никаких путей фейка**: simulation-хуки прототипа (`--fixture`, `--simulate-board`) и авто-аттестация (`--yes`) в production контракт НЕ входят; evidence только с живых probe/capture; подпись checklist — интерактивно или пред-подписанным файлом владельца. Сценарий не может превратить failed product behavior в pass (scope #65).
+5. **Правило невакуумности**: `behavior`-сценарий обязан иметь наблюдаемый позитив (§2.1, §3.3); молчание не является PASS'ом поведения.
 
 ### 4.3 Split владелец/агент
 
@@ -239,7 +262,7 @@ Enforcement: runner — bench tooling в `bench/`, не входит в domain i
 | Физическое подключение (ST-Link XT21, UART XT22, датчики) | владелец | нет | процедура #73, «Процедура подключения» |
 | Energizing + gate (напряжения 3.3V/5V, нагрев, запах) | владелец | нет | gate #73; аварийная остановка — правило стенда |
 | Checklist-подпись per-run | владелец | нет | runner записывает sign-off в evidence; без подписи — отказ |
-| Detection (idcode/UID/порт) | агент (runner) | да | OpenOCD + pyserial, read-only |
+| Detection (idcode/UID/порт) | агент (runner) | да | в прогоне — после checklist-gate (§3.1); standalone `detect` — read-only диагностика (транзиентный halt, без мутаций) |
 | Flash (ST-Link) | агент | да | строго после подписи checklist |
 | Capture/normalize/verdict/evidence | агент | да | bounded, детерминированно |
 
@@ -282,7 +305,8 @@ verification-runner evidence <result.json>           # проверка полн
 
 ```
 run(scenario):
-    gates = [probe_board, check_port, (checklist if flash)]
+    gates = [(checklist if flash), probe_board, check_port]   # порядок §3.1:
+                                                              # checklist ПЕРВЫМ
     missing = [g for g in gates if not g.pass]
     if scenario.flash and not missing: flash()          # hard gate
     elif scenario.flash: record_skip(missing)           # INCOMPLETE path
@@ -329,13 +353,15 @@ flowchart LR
 | T1 normalize valid | 22 валидных кадра (fixture) | framesValid=22, framesBad=0, logLines разобраны |
 | T2 normalize resync | мусор между кадрами | resync, валидные посчитаны |
 | T3 normalize badcrc | повреждённые кадры | framesBad учтены, ratio точен |
-| T4 oracle PASS | minFrames достигнут, ratio в норме | PASS |
-| T5 oracle TIMEOUT | minFrames не достигнут за окно | TIMEOUT, raw сохранён |
+| T4 oracle PASS | behavior: minFrames достигнут, ratio в норме | PASS |
+| T5 oracle TIMEOUT | behavior: minFrames не достигнут за окно | TIMEOUT, raw сохранён |
 | T6 oracle FAIL | ratio > maxCrcBadRatio / forbidPattern | FAIL |
-| T7 gate checklist | flash.required без подписи | INCOMPLETE, flash НЕ вызван (mock) |
+| T7 gate checklist | flash.required без подписи | INCOMPLETE, probe/flash НЕ вызваны (mock) |
 | T8 identity | gitSha/artifactSha256 отсутствуют | missing += gitSha/artifactSha256 |
 | T9 verdict exit | PASS/FAIL/TIMEOUT/INCOMPLETE | 0/1/2/3 |
 | T10 bundle | result содержит rawPath, normalized, verdict | evidence.complete=true |
+| T11 vacuous oracle | behavior: minFrames=0 + пустые patterns | schema error, прогон не начинается |
+| T12 flash-verify | minFrames=0 + flash ok + probe alive | PASS без утверждения поведения |
 
 Property-описание: oracle-решения монотонны по `frames` (больше валидных кадров при том же ratio не ухудшает вердикт); полнота детерминирована (missing-множество не зависит от порядка gate'ов).
 
@@ -353,7 +379,7 @@ Property-описание: oracle-решения монотонны по `frames
 
 | Obligation/требование | Закрытие через runner |
 | --- | --- |
-| #52 §6.3 обязательные L4/L5 acceptance (C1, T_fs, lease, watchdog, power-cut, CAN flood) | L4/L5-сценарии runner'а (measurement-секция для L5, #62) |
+| #52 §6.3 обязательные L5 acceptance (release gate: C1, T_fs, lease, watchdog, power-cut, CAN flood) | L5-сценарии runner'а (measurement-секция, #62) |
 | #52 §7.1 evidence records | runner-результат = CI-artifact/measurement report источник |
 | #52 §2 L4 nightly (bounded steps, high-water, журналы, verified-boot smoke) | nightly-сценарии runner'а |
 | #70 T16 L4 smoke + observed maxima | первый L4-сценарий после approval |

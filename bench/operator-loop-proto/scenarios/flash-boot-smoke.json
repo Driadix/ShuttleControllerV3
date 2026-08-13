@@ -1,7 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "flash-boot-smoke",
-  "title": "Flash boot smoke: ST-Link flash + post-flash UART capture",
+  "title": "Flash verify: ST-Link flash + probe alive",
+  "type": "flash-verify",
   "phase": "L4",
   "flash": { "required": true, "env": "firmware" },
   "capture": {

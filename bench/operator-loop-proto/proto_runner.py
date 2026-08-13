@@ -408,9 +408,34 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
         "evidence": {"complete": False, "missing": []},
     }
 
-    # 1. Board identity (mandatory evidence)
+    # 0. Checklist gate - FIRST (hard gate: no physical interaction, probe
+    #    included, before gates pass; contract §3.1)
+    need_flash = bool(scenario.get("flash", {}).get("required")) and not no_flash
+    if need_flash:
+        if checklist_path and Path(checklist_path).exists():
+            cl = json.loads(Path(checklist_path).read_text(encoding="utf-8"))
+            result["checklist"] = cl
+            if not cl.get("signed"):
+                result["evidence"]["missing"].append("checklistSignoff")
+        else:
+            if owner:
+                cl = make_checklist(owner, out=str(out_dir / "checklist.json"),
+                                    assume_yes=False)
+                result["checklist"] = cl
+                if not cl.get("signed"):
+                    result["evidence"]["missing"].append("checklistSignoff")
+            else:
+                result["evidence"]["missing"].append("checklist")
+
+    # 1. Board identity (mandatory evidence) - gated: no physical interaction
+    #    (probe included) before gates pass (contract §3.1)
     if simulate_board:
         result["board"] = dict(SIM_BOARD)
+    elif result["evidence"]["missing"]:
+        result["board"] = {"probe": "SKIPPED",
+                           "reason": "pre-flight gate failed: "
+                                     + ", ".join(result["evidence"]["missing"])}
+        result["evidence"]["missing"].append("boardIdentity")
     else:
         try:
             result["board"] = stlink_probe()
@@ -430,24 +455,6 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
         result["uart"] = uart
         if not uart["open"]:
             result["evidence"]["missing"].append("uartPort")
-
-    # 3. Checklist gate for flash scenarios
-    need_flash = bool(scenario.get("flash", {}).get("required")) and not no_flash
-    if need_flash:
-        if checklist_path and Path(checklist_path).exists():
-            cl = json.loads(Path(checklist_path).read_text(encoding="utf-8"))
-            result["checklist"] = cl
-            if not cl.get("signed"):
-                result["evidence"]["missing"].append("checklistSignoff")
-        else:
-            if owner:
-                cl = make_checklist(owner, out=str(out_dir / "checklist.json"),
-                                    assume_yes=False)
-                result["checklist"] = cl
-                if not cl.get("signed"):
-                    result["evidence"]["missing"].append("checklistSignoff")
-            else:
-                result["evidence"]["missing"].append("checklist")
 
     # 4. Flash - ONLY when the pre-flight evidence gates pass (hard gate:
     #    refusal must prevent physical side effects, not just the verdict).

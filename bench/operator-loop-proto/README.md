@@ -67,12 +67,18 @@ Exit codes: 0 PASS, 1 FAIL, 2 TIMEOUT, 3 INCOMPLETE (refusal).
 
 ## Simulation hooks vs production contract
 
-`--fixture` and `--simulate-board` exist so the pipeline mechanics can be
-demonstrated without the bench. They are explicitly EXCLUDED from the
-production runner contract (ticket #65): production evidence must come from a
-live ST-Link probe and a live capture. The refusal path is demonstrated for
-real: a missing board identity, missing checklist, or missing SHA yields
-INCOMPLETE without touching hardware.
+`--fixture`, `--simulate-board` and `--yes` (auto-attestation) exist so the
+pipeline mechanics can be demonstrated without a human at the bench or without
+the bench at all. They are explicitly EXCLUDED from the production runner
+contract (ticket #65): production evidence must come from a live ST-Link probe
+and a live capture, and the checklist sign-off must be a genuine per-run owner
+attestation (interactive or a pre-signed file) - never an automatic flag. The
+refusal path is demonstrated for real: a missing board identity, missing
+checklist, or missing SHA yields INCOMPLETE without touching hardware.
+
+The committed `evidence/checklist.json` was signed by the owner (Driadix) in
+the HITL session of 2026-08-13 (ticket #60 briefing); the `--yes` flag was the
+recording mechanism, not the authorization.
 
 ## Live bench commands (owner checklist attestation required first)
 

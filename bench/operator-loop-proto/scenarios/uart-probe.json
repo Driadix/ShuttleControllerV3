@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "id": "uart-probe",
   "title": "UART probe: bench controller stream alive",
+  "type": "behavior",
   "phase": "L4",
   "flash": { "required": false, "env": "firmware" },
   "capture": {
