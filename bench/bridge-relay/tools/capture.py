@@ -48,6 +48,27 @@ MSG_NAMES = {
     0x33: "ACK",
 }
 
+# SensorPacket roles: ChR=0x09<-distR, ChF=0x0A<-distF, PlR=0x0B<-distPltR,
+# PlF=0x0C<-distPltF (Cntrl_V2 ShuttleProtocol.h)
+SENSOR_ROLES = (
+    ("0x09 ChR", 2, 1 << 11),   # distR offset, HW_FLAG_TOF_CH_R_VALID
+    ("0x0A ChF", 0, 1 << 10),   # distF offset, HW_FLAG_TOF_CH_F_VALID
+    ("0x0B PlR", 6, 1 << 13),   # distPltR offset, HW_FLAG_TOF_PAL_R_VALID
+    ("0x0C PlF", 4, 1 << 12),   # distPltF offset, HW_FLAG_TOF_PAL_F_VALID
+)
+
+
+def decode_sensors(payload: bytes) -> str:
+    if len(payload) < 16:
+        return f"sensors_short({len(payload)}B)"
+    hw_flags = int.from_bytes(payload[14:16], "little")
+    parts = []
+    for name, off, flag in SENSOR_ROLES:
+        dist = int.from_bytes(payload[off : off + 2], "little")
+        valid = (hw_flags & flag) != 0
+        parts.append(f"{name}={'%u' % dist if valid else 'invalid'}")
+    return ", ".join(parts)
+
 
 def crc16(data: bytes) -> int:
     crc = 0xFFFF
@@ -108,6 +129,7 @@ def main() -> int:
     msgs = {}
     logs = []
     as5600 = []
+    sensors = []
     while i + HDR_LEN + 2 <= len(buf):
         if buf[i] != 0xBB or buf[i + 1] != 0xCC:
             i += 1
@@ -131,6 +153,8 @@ def main() -> int:
                 logs.append(payload[1:].split(b"\x00")[0].decode("latin1"))
             elif mid == 0x09 and len(as5600) < 3:
                 as5600.append(decode_as5600(payload))
+            elif mid == 0x02 and len(sensors) < 3:
+                sensors.append(decode_sensors(payload))
         else:
             bad += 1
         frames += 1
@@ -141,6 +165,8 @@ def main() -> int:
         print(f"  msgID 0x{mid:02x} {MSG_NAMES.get(mid, '?')}: {count}")
     for line in logs:
         print(f"  LOG: {line}")
+    for s in sensors:
+        print(f"  SENSORS: {s}")
     for a in as5600:
         print(f"  AS5600: {a}")
     return 0 if ok > 0 else 1
