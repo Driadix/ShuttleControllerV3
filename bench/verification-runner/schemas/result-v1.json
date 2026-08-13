@@ -1,0 +1,160 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "result-v1.json",
+  "title": "Verification runner result v1",
+  "description": "Normalized run result + identity + verdict (issue #60 section 2.2). boardExpected mirrors scenario.identity.board; board is the observed probe result. Paths are POSIX-style (owner decision).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runner", "scenario", "startedAt", "finishedAt",
+               "board", "boardExpected", "uart", "firmware", "toolchain",
+               "checklist", "flash", "capture", "normalized", "verdict",
+               "reasons", "evidence"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runner": { "const": "verification-runner" },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "schemaVersion"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "schemaVersion": { "type": "integer" }
+      }
+    },
+    "startedAt": { "type": "string" },
+    "finishedAt": { "type": "string" },
+    "board": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["probe"],
+          "properties": {
+            "probe": { "enum": ["PASS", "FAIL", "SKIPPED"] },
+            "part": { "type": "string" },
+            "idcode": { "type": "string" },
+            "uid": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    },
+    "boardExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["part", "uid"],
+      "properties": {
+        "part": { "type": "string", "minLength": 1 },
+        "uid": { "type": "string", "pattern": "^[0-9a-fA-F]{24}$" }
+      }
+    },
+    "uart": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["port", "open"],
+          "properties": {
+            "port": { "type": "string" },
+            "open": { "type": "boolean" },
+            "bytes": { "type": "integer" }
+          }
+        }
+      ]
+    },
+    "firmware": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["gitSha", "gitDescribe", "artifact", "artifactSha256"],
+      "properties": {
+        "gitSha": { "type": ["string", "null"] },
+        "gitDescribe": { "type": ["string", "null"] },
+        "artifact": { "type": ["string", "null"] },
+        "artifactSha256": { "type": ["string", "null"] }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["platformio", "platform", "core"],
+      "properties": {
+        "platformio": { "type": ["string", "null"] },
+        "platform": { "type": ["string", "null"] },
+        "core": { "type": ["string", "null"] }
+      }
+    },
+    "checklist": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["schemaVersion", "signed", "owner", "at", "items"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "signed": { "type": "boolean" },
+            "owner": { "type": "string" },
+            "at": { "type": "string" },
+            "items": { "type": "array" }
+          }
+        }
+      ]
+    },
+    "flash": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["ok"],
+          "properties": {
+            "ok": { "type": "boolean" },
+            "skipped": { "type": "boolean" },
+            "env": { "type": "string" },
+            "durationS": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "capture": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["rawPath", "rawBytes", "durationS"],
+          "properties": {
+            "rawPath": { "type": ["string", "null"] },
+            "rawBytes": { "type": "integer" },
+            "durationS": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "normalized": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "framesValid", "framesBad", "msgCounts", "logLines"],
+      "properties": {
+        "bytes": { "type": "integer" },
+        "framesValid": { "type": "integer" },
+        "framesBad": { "type": "integer" },
+        "msgCounts": { "type": "object" },
+        "logLines": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "verdict": { "enum": ["PASS", "FAIL", "TIMEOUT", "INCOMPLETE"] },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "missing", "resultPath"],
+      "properties": {
+        "complete": { "type": "boolean" },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "resultPath": { "type": "string" }
+      }
+    }
+  }
+}
