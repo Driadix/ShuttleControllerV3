@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "uart-probe",
+  "title": "UART probe: bench controller stream alive",
+  "phase": "L4",
+  "flash": { "required": false, "env": "firmware" },
+  "capture": {
+    "port": "auto",
+    "baud": 230400,
+    "parity": "E",
+    "durationS": 20,
+    "maxBytes": 2000000
+  },
+  "oracle": {
+    "minFrames": 1,
+    "maxCrcBadRatio": 0.2,
+    "requirePatterns": [],
+    "forbidPatterns": []
+  }
+}

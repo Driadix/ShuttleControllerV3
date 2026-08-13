@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "signed": true,
+  "owner": "Driadix",
+  "at": "2026-08-13T10:25:27+00:00",
+  "items": [
+    {
+      "text": "Плата обесточена перед коммутацией (оба USB отключены)",
+      "confirmed": true
+    },
+    {
+      "text": "ST-Link V2 подключен на XT21 (SWDIO/SWCLK/GND/3.3V_1)",
+      "confirmed": true
+    },
+    {
+      "text": "UART-путь подключен на XT22 (relay-дисплей или конвертер)",
+      "confirmed": true
+    },
+    {
+      "text": "Датчики подключены (WS_Sensor/XT28: 5V/GNDREF/SCL/SDA)",
+      "confirmed": true
+    },
+    {
+      "text": "Питание включено; напряжения 3.3V_1 ~= 3.3 V, 5V ~= 5 V (gate)",
+      "confirmed": true
+    },
+    {
+      "text": "Нет нагрева/запаха/дыма; правило аварийной остановки принято",
+      "confirmed": true
+    },
+    {
+      "text": "Физические перекоммутации только при обесточенной плате",
+      "confirmed": true
+    }
+  ]
+}
