@@ -22,7 +22,7 @@
 #define MSG_SENSORS        0x02
 #define MSG_REQ_SENSORS    0x05
 #define MSG_AS5600_HEALTH  0x09
-#define MSG_REQ_AS5600     0x0A
+#define MSG_REQ_AS5600_HEALTH 0x0A
 #define MSG_LOG            0x10
 
 #define HW_FLAG_TOF_CH_F_VALID  (1U << 10)
@@ -107,7 +107,7 @@ static void renderSensorsFrame(void)
     // SensorPacket, 16 B little-endian: distF distR distPltF distPltR
     // angle lifterCurrent temperature_dC hardwareFlags
     uint8_t *p = rxBuf + HDR_LEN;
-    tofDist[0] = (uint16_t)(p[0] | (p[1] << 8));   // ChR = distanceR? see roles below
+    uint16_t distF    = (uint16_t)(p[0] | (p[1] << 8));
     uint16_t distR    = (uint16_t)(p[2] | (p[3] << 8));
     uint16_t distPltF = (uint16_t)(p[4] | (p[5] << 8));
     uint16_t distPltR = (uint16_t)(p[6] | (p[7] << 8));
@@ -116,7 +116,7 @@ static void renderSensorsFrame(void)
     // Role wiring: ChR=0x09<-distR, ChF=0x0A<-distF, PlR=0x0B<-distPltR,
     // PlF=0x0C<-distPltF
     tofDist[0] = distR;
-    tofDist[1] = (uint16_t)(p[0] | (p[1] << 8));
+    tofDist[1] = distF;
     tofDist[2] = distPltR;
     tofDist[3] = distPltF;
     tofValid[0] = (hwFlags & HW_FLAG_TOF_CH_R_VALID) != 0;
@@ -254,7 +254,7 @@ static void redrawPanel(void)
             (unsigned)CTRL_BAUD, (unsigned long)rxBytes, (unsigned long)logFrames);
 
     if (hasAsHealth)
-        drawRow(1, TFT_BLACK, "AS5600 raw=%u [%s] fail=%lu succ=%lu",
+        drawRow(1, TFT_BLACK, "AS5600 raw=%u [%s] cFail=%lu cSucc=%lu",
                 (unsigned)asAngleRaw, fl, (unsigned long)asFailures,
                 (unsigned long)asSuccesses);
     else
@@ -268,7 +268,7 @@ static void redrawPanel(void)
                 drawRow(2 + i, TFT_BLACK, "ToF %02X %s: %u mm",
                         (unsigned)kTofAddr[i], kTofRole[i], (unsigned)tofDist[i]);
             else
-                drawRow(2 + i, TFT_MAROON, "ToF %02X %s: noack",
+                drawRow(2 + i, TFT_MAROON, "ToF %02X %s: invalid",
                         (unsigned)kTofAddr[i], kTofRole[i]);
         }
         else
@@ -310,7 +310,7 @@ void loop(void)
     if (nowMs - lastReqMs >= 500)
     {
         lastReqMs = nowMs;
-        sendRequest((nowMs / 500) & 1 ? MSG_REQ_SENSORS : MSG_REQ_AS5600);
+        sendRequest((nowMs / 500) & 1 ? MSG_REQ_SENSORS : MSG_REQ_AS5600_HEALTH);
     }
 
     int n = Serial1.available();
