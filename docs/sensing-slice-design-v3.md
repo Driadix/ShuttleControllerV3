@@ -35,7 +35,7 @@ flowchart LR
 | Элемент | Компонент (#43 §2) | Владение | Примечание |
 | --- | --- | --- | --- |
 | Sensing Service | domain | acquisition scheduling (ToF RR 8 ms слот, AS5600 250 ms), sensor ownership (4 ToF + AS5600), timestamped snapshots, freshness classification, typed faults/warnings, recovery-координация | единственный владелец расписания I2C-слотов (#43 §4, #48 §7) |
-| I2C adapter | adapters (HAL) | транзакции Wire (100 kHz), классификация статусов (ok/noack/short/unknown), recovery-механика (reinit + ≤16 SCL + cooldown ≥5 s, #48 §7, obligation #14) | реализует v3::I2cPort; только foreground |
+| I2C adapter | adapters (HAL) | транзакции Wire (100 kHz), классификация статусов (ok/noack/short/unknown), recovery-механика (ручной open-drain ≤16 SCL + STOP + reinit, #48 §7, obligation #14) | реализует v3::I2cPort; только foreground |
 | Ports | domain | v3::I2cPort (production-форма slice::I2cPort), SensorSnapshot/типы | dependencies внутрь (#43, #51 §5) |
 
 **Граница модуля (#63)**: Sensing Service + I2C adapter + порты + snapshots/freshness/fault-типы + L4-наблюдаемость (RAM read-back сценарий runner). **НЕ входят**: операционные алгоритмы движения (тикет Scope), Safety Authority health-FSM (#71), Observability Producer/UART (#72), BMS-адаптер (свой слайс), CAN-адаптеры.
@@ -153,9 +153,11 @@ struct SensingConfig {
 Домен framework-free (#43: dependencies inward): `SensingService` - чистая state machine, принимает `now` и возвращает следующий срок слота; планирование (kernel::schedule с deadline now+8) - обязанность composition root (`platform/main.cpp`), не домена.
 
 ```text
-sensing_step (composition root, platform/main.cpp):   # kernel::schedule(deadline now+8)
+sensing_step (glue, platform/sensing_schedule.cpp):   # kernel::schedule(deadline now+8)
   service->step(now)                # одна bounded транзакция (ToF) + AS5600 по периоду
-  kernel::schedule(sensing_step, ctx, now + service->next_step_ms())
+  now2 = monotonic::now_ms()        # СВЕЖИЙ now после шага (длинный шаг не старит дедлайн)
+  if kernel::schedule(sensing_step, ctx, now2 + service->next_step_ms()) != Ok:
+      kernel::schedule(sensing_step, ctx, now2 + 1)   # перевооружение в окне
 
 SensingService::step(now):         # domain, чистый C++ (stdint), без Arduino/platform
   # ToF round-robin: один слот, следующее устройство
@@ -307,13 +309,13 @@ std::uint32_t recovery_count() const;
 ```text
 loop() -> kernel::run() -> process_tick()
   └─ ring.run_next(now)                    # один bounded шаг за тик
-     └─ sensing_tick(ctx)                  # glue (main.cpp): deadline now+8
+     └─ sensing::schedule_tick(ctx)        # glue (platform/sensing_schedule.cpp)
         ├─ service->step(now)              # domain, framework-free
         │  ├─ i2c->read(tof_addr, 0x20, buf, 13)      # ~1.5 ms
         │  ├─ (если AS5600 due) i2c->read(0x36, ...)  # ~1 ms
         │  ├─ record_success/failure -> snapshot update
         │  └─ refresh_freshness(now)
-        └─ kernel::schedule(sensing_tick, ctx, now + service->next_step_ms())
+        └─ kernel::schedule(..., now2 + next_step_ms())  # СВЕЖИЙ now2; retry now2+1
   ├─ (если overrun) events->step_overrun(dt_ms)
   ├─ safety->tick(now)                     # SafetySlot (#70; Ф1 stub)
   └─ watchdog.reload()
@@ -445,7 +447,7 @@ flowchart TD
 
 ## 8. Vertical slice граница (#63)
 
-Один vertical PR: Sensing Service + v3::I2cPort + I2C adapter (Wire 100 kHz, PB11/PB10) + snapshots/freshness/typed faults + host-тесты T1-T15 + runner-сценарий L4 (RAM read-back). Наблюдаемый контракт (Acceptance тикета): host-тесты защищают state/freshness/recovery; L4 runner подтверждает acquisition cadence, bounded step duration, stale/fault transitions и recovery на реальных датчиках (0x09/0x0C present -> Healthy, 0x0A/0x0B absent -> Faulted NACK, AS5600 -> Healthy) с raw и normalized evidence.
+Один vertical PR: Sensing Service + v3::I2cPort + I2C adapter (Wire 100 kHz, PB11/PB10) + snapshots/freshness/typed faults + host-тесты T1-T16 + runner v2-механизм (readback-шаг, schema scenario-v2; L1-сценарий после HITL-решения §0 и восстановления стенда). Наблюдаемый контракт (Acceptance тикета): host-тесты защищают state/freshness/recovery; L4 runner подтверждает acquisition cadence, bounded step duration, stale/fault transitions и recovery на реальных датчиках (0x09/0x0C present -> Healthy, 0x0A/0x0B absent -> Faulted NACK, AS5600 -> Healthy) с raw и normalized evidence.
 
 **Зависимость от стенда**: L4 acceptance требует живых датчиков (5V/GNDREF питание) И production-диагностической RAM-секции (снапшоты по pinned адресу, читаемые runner'ом) - последняя является реализацией решения владельца §0 п.3 (RAM read-back наблюдаемость, UART молчит в Фазе 1). До принятия решения runner v2-механизм (tools/readback.py, evaluate_readback_oracle, schema scenario-v2, gated observation) поставляется, но L1-сценарий `sensing-acquire` НЕ включается (структура секции фиксируется после §0). При недоступности стенда - evidence по host + прототип (деградация документируется, #52 §12).
 
@@ -471,7 +473,7 @@ flowchart TD
 - **Unknown**: фактическая длительность ToF-чтения на живом датчике (прототип мерил только NACK-путь, 4-5 µs; норматив ~1.2-1.5 ms, #48 §4 code-derived) - подтверждается L1 (tof read duration, bounded step).
 - **Assumption**: Wire без DMA блокирует только на время транзакции (bounded, ≤ слот) - допустимо в шаге (обоснование §2.3); альтернатива (DMA-I2C) - отдельное решение, если измерение L1 покажет превышение бюджета.
 - **Unknown**: wire-маппинг typed faults/warnings (registry #47 §16.4 в разработке) - в #63 доменные enum; wire-коды добавляются при готовности реестра (аддитивно, без изменения контракта порта).
-- **Fact/отклонение**: recovery-механика адаптера - reinit + recoverBus ядра STM32duino (до 20 SCL-импульсов, останавливается при освобождении шины); норматив #48 §7/obligation #14 - ≤ 16 импульсов. Буквальное расхождение (20 max у ядра) принято: механика идентична (импульсы до отпускания), собственный генератор ≤16 импульсов - избыточность для Фазы 1; пересмотр при L4-замере recovery.
+- **Fact**: recovery-механика адаптера - ручной open-drain recovery: ≤ 16 SCL-импульсов с проверкой SDA после каждого, STOP при освобождении, Wire reinit ТОЛЬКО при освобождённой шине (recoverBus ядра при SDA HIGH даёт 0 импульсов); при незанятой после 16 - Stuck без reinit (следующая попытка - через cooldown Sensing Service). Соответствует obligation #14 (≤ 16 SCL).
 - **NIT (принят)**: age_ms - uint32; возраст сэмпла > ~49.7 суток непрерывной работы с мёртвым сенсором оборачивается (stale не сработает). Недостижимо практически: RR-опрос каждые 8 ms, стрик-фейлы Fault-ят задолго (threshold 3). Дизайн-бюджет - uint32 age (как в V1).
 - **Confidence**: высокая по state/freshness/recovery (V1 keep, host-тестируемо); средняя по L4-evidence (зависит от восстановления питания стенда и HITL-решения §0 по диагностической секции).
 

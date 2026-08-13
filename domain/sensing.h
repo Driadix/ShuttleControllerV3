@@ -10,8 +10,10 @@
 // one 8 ms slot per read, 4 sensors at 0x09..0x0C) and AS5600 (every 250 ms,
 // 0x36), keeps timestamped snapshots, classifies freshness (ToF 300 ms class,
 // AS5600 1 s class - pre-allocated #43), tracks V1 health states and
-// coordinates bus recovery (reinit + <= 16 SCL + cooldown >= 5 s, obligation
-// #14). Operational motion algorithms are out of scope (#63).
+// coordinates bus recovery (adapter manual open-drain recovery: <= 16 SCL
+// pulses + STOP + Wire reinit on release, with a >= 5 s cooldown -
+// obligation #14; the vendor recoverBus then sees a released bus and emits
+// 0 pulses). Operational motion algorithms are out of scope (#63).
 #pragma once
 
 #include <cstdint>

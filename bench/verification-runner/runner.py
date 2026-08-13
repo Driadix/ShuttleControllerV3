@@ -576,13 +576,12 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
                 addr = int(rb["addr"])
                 words = int(rb["words"])
                 window = float(rb["windowS"])
-                # Snapshot A as soon as the firmware is running, B after the
+                # Snapshot A immediately (the flash->identity steps already
+                # elapsed; the firmware counts from reset run), B after the
                 # full window: the delta rules in the scenario accumulate
-                # over `window` (not half of it - review MAJOR fix, #63).
-                settle = min(2.0, window * 0.2)
-                time.sleep(settle)
+                # over exactly `window` (review MAJOR fix, #63).
                 snap_a = readback.read_ram_words(addr, words)
-                time.sleep(window - settle)
+                time.sleep(window)
                 snap_b = readback.read_ram_words(addr, words)
                 a_path = out_dir / f"raw-{scenario['id']}-a.mdw"
                 b_path = out_dir / f"raw-{scenario['id']}-b.mdw"

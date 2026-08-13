@@ -627,18 +627,20 @@ TEST_F(SensingGlueTest, ReschedulesAfterLongStep)
     ASSERT_EQ(v3::kernel::schedule(&v3::sensing::schedule_tick, &m_svc, 0u),
               v3::kernel::ScheduleResult::Ok);
 
-    // Tick 0: runs the step (100 ms virtual), the glue re-arms with a fresh
-    // deadline now+8 = 108 (inside [100, 110]).
+    // Tick 0: the step consumes 3 reads (ToF + AS5600 RAW + ANGLE), each
+    // advancing the clock by 100 ms (stuck-bus model) -> now = 300. The glue
+    // re-arms from a FRESH clock read: deadline now2 + 8 = 308 (in window).
     v3::kernel::process_tick();
     EXPECT_EQ(m_i2c.recover_count(), 1u); // first Stuck -> recover #1
 
-    // Tick 108: the re-armed slot is due and executes - the acquisition is
-    // alive after a long step (with the pre-fix glue the deadline 0+8=8 was
-    // stale at now=100 and the schedule was silently rejected).
+    // Tick 408: the re-armed slot (deadline 308) is due and executes a second
+    // step (3 more reads). With the pre-fix glue the deadline 0+8=8 was stale
+    // at now=300 -> silently rejected -> the queue stayed empty and the
+    // acquisition died; the old glue yields exactly 3 reads total.
     m_env.time.advance_ms(108);
     v3::kernel::process_tick();
-    EXPECT_GE(m_i2c.log_count(), 2u); // two ToF reads => two steps executed
-    // Cooldown: the second Stuck (at now=208) is within 5 s of the first
+    EXPECT_GE(m_i2c.log_count(), 6u); // two live steps x 3 reads
+    // Cooldown: the second Stuck (at now=708) is within 5 s of the first
     // recover (at 0) -> no second recover yet.
     EXPECT_EQ(m_i2c.recover_count(), 1u);
 }

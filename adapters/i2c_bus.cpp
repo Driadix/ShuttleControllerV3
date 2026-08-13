@@ -41,6 +41,25 @@ bool bus_idle()
     return (GPIOB->IDR & (kSdaMask | kSclMask)) == (kSdaMask | kSclMask);
 }
 
+// Manual open-drain SCL toggling for recover() (obligation #14: <= 16 SCL
+// pulses). PB10 (SCL) / PB11 (SDA) are switched to GPIO output open-drain;
+// AFR (AF4) is restored afterwards so Wire keeps working.
+void gpio_output_od(bool enabled)
+{
+    if (enabled)
+    {
+        GPIOB->MODER = (GPIOB->MODER & ~(0x3u << 20 | 0x3u << 22)) |
+                       (0x1u << 20) | (0x1u << 22); // PB10/PB11 -> output
+        GPIOB->OTYPER |= (1u << 10) | (1u << 11);   // open-drain
+        GPIOB->ODR |= (1u << 10) | (1u << 11);      // lines released (pull-ups)
+    }
+    else
+    {
+        GPIOB->MODER = (GPIOB->MODER & ~(0x3u << 20 | 0x3u << 22)) |
+                       (0x2u << 20) | (0x2u << 22); // PB10/PB11 -> AF (AF4 kept)
+    }
+}
+
 } // namespace
 
 void I2cBus::init()
@@ -102,16 +121,52 @@ I2cResult I2cBus::read(std::uint8_t device, std::uint8_t reg,
 
 I2cResult I2cBus::recover()
 {
-    // Reinit the peripheral and the pins; STM32duino begin() runs its bus
-    // recovery for a master before starting (up to 20 SCL pulses, stopping
-    // as soon as the bus is released - the vendor core loops i < 20). The
-    // obligation #14 bound is <= 16 pulses; the vendor mechanic is the
-    // closest available without a custom pulse generator, and it stops on
-    // release rather than always pulsing 20x - documented in the design
-    // doc section 10. The >= 5 s cooldown between attempts is enforced by
-    // the Sensing Service.
+    // Manual open-drain recovery (obligation #14: <= 16 SCL pulses, then
+    // STOP). Toggle SCL up to 16 times, checking SDA after each pulse; emit
+    // a STOP once SDA is released; only then reinit Wire - its recoverBus
+    // sees SDA high and emits 0 pulses. If SDA is still held after 16
+    // pulses: restore the AF pins and return Stuck WITHOUT Wire.begin()
+    // (the next attempt is gated by the Sensing Service cooldown).
+    gpio_output_od(true);
+
+    bool released = false;
+    for (std::uint32_t i = 0; i < 16u && !released; ++i)
+    {
+        GPIOB->ODR &= ~kSclMask; // SCL low
+        delayMicroseconds(5);
+        GPIOB->ODR |= kSclMask;  // SCL high (released through the pull-ups)
+        delayMicroseconds(5);
+        released = (GPIOB->IDR & kSdaMask) != 0u; // SDA high => bus free
+    }
+
+    if (!released)
+    {
+        gpio_output_od(false);
+        m_last_wire_status = 4u; // HAL busy/error class
+        return I2cResult::Stuck;
+    }
+
+    // STOP: SCL low, SDA low; release SCL (verify it went high), then
+    // release SDA while SCL stays high - the SDA low->high edge with SCL
+    // high is the STOP condition. If SCL did not release, the bus is still
+    // stuck: return Stuck without reinit.
+    GPIOB->ODR &= ~kSclMask; // SCL low
+    GPIOB->ODR &= ~kSdaMask; // SDA low
+    delayMicroseconds(5);
+    GPIOB->ODR |= kSclMask;  // release SCL
+    delayMicroseconds(5);
+    if ((GPIOB->IDR & kSclMask) == 0u)
+    {
+        gpio_output_od(false);
+        m_last_wire_status = 4u; // HAL busy/error class
+        return I2cResult::Stuck;
+    }
+    GPIOB->ODR |= kSdaMask;  // release SDA while SCL high -> STOP edge
+    delayMicroseconds(5);
+
+    gpio_output_od(false);
     Wire.end();
-    Wire.begin(kSdaPin, kSclPin);
+    Wire.begin(kSdaPin, kSclPin); // SDA high on entry => recoverBus emits 0
     Wire.setClock(kBusHz);
     m_last_wire_status = 0u;
     return I2cResult::Recovered;

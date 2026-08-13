@@ -7,9 +7,9 @@
 // Status classification follows V1 TOF_Sense.cpp: NACK (address/data) and
 // under-read are device-level outcomes (no bus recovery); HAL
 // BUSY/TIMEOUT/ERROR is a bus-level outcome (Stuck -> recover candidate).
-// recover() = Wire reinit (+ <= 16 SCL pulses as part of begin()'s
-// recoverBus), obligation #14; the >= 5 s cooldown lives in the Sensing
-// Service (domain), not here.
+// recover() = manual open-drain recovery (<= 16 SCL pulses + STOP, obligation
+// #14) + Wire reinit when the bus is released; the >= 5 s cooldown lives in
+// the Sensing Service (domain), not here.
 #pragma once
 
 #include <cstdint>
