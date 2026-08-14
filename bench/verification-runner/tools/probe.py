@@ -42,6 +42,7 @@ def stlink_probe(timeout_s: int = 40) -> dict:
     cfg = [
         OPENOCD, "-f", "interface/stlink.cfg", "-f", "target/stm32f4x.cfg",
         "-c", "init; halt; mdw 0xE0042000 1", "-c", "mdw 0x1FFF7A10 3",
+        "-c", "resume",  # never leave the MCU halted (ticket #63 L1 gate fix)
         "-c", "shutdown",
     ]
     r = subprocess.run(cfg, capture_output=True, text=True, timeout=timeout_s)

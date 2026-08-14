@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "signed": false,
+  "owner": "",
+  "at": "",
+  "items": [
+    {
+      "id": "probe",
+      "text": "ST-Link V2 подключен на XT21 (SWD), питание платы подано",
+      "confirmed": false
+    },
+    {
+      "id": "sensors",
+      "text": "ToF 0x09/0x0C и AS5600 подключены на разъёмы по bench record; 0x0A/0x0B физически отсутствуют (ожидаемое NACK)",
+      "confirmed": false
+    },
+    {
+      "id": "power",
+      "text": "Питание: ST-Link USB + USB-UART USB с одного ПК; признаков нагрева/нештатного поведения нет",
+      "confirmed": false
+    }
+  ]
+}

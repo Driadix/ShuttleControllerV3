@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "id": "sensing-acquire",
+  "title": "Sensing acquisition cadence, states and freshness (ToF + AS5600)",
+  "type": "behavior",
+  "phase": "L4",
+  "identity": {
+    "board": {
+      "part": "STM32F405RG",
+      "uid": "002900363033470336363131"
+    }
+  },
+  "flash": {
+    "required": true,
+    "env": "firmware"
+  },
+  "readback": {
+    "addr": 536940544,
+    "words": 52,
+    "windowS": 10,
+    "rules": [
+      {
+        "name": "magic",
+        "offset": 0,
+        "kind": "eq",
+        "expect": 1397050963,
+        "note": "0x53454E53 'SENS' - live production diagnostic struct"
+      },
+      {
+        "name": "version",
+        "offset": 1,
+        "kind": "eq",
+        "expect": 2,
+        "note": "production diagnostic struct version (v2)"
+      },
+      {
+        "name": "tof_ch_rev_cadence",
+        "offset": 16,
+        "kind": "delta",
+        "minDelta": 180,
+        "note": "samples_ok 0x09 (sensor 0, word 16) over 10 s: ~31/s ideal, 60% floor"
+      },
+      {
+        "name": "as5600_cadence",
+        "offset": 48,
+        "kind": "delta",
+        "minDelta": 24,
+        "note": "samples_ok AS5600 (sensor 4, word 48) over 10 s: ~4/s ideal, 60% floor"
+      },
+      {
+        "name": "tof_ch_fwd_state",
+        "offset": 23,
+        "kind": "eq",
+        "expect": 3,
+        "note": "0x0A absent on the bench: Faulted (NACK threshold)"
+      },
+      {
+        "name": "tof_pal_rev_state",
+        "offset": 31,
+        "kind": "eq",
+        "expect": 3,
+        "note": "0x0B absent on the bench: Faulted"
+      },
+      {
+        "name": "tof_ch_rev_state",
+        "offset": 15,
+        "kind": "eq",
+        "expect": 1,
+        "note": "0x09 present: Healthy"
+      },
+      {
+        "name": "tof_pal_fwd_state",
+        "offset": 39,
+        "kind": "eq",
+        "expect": 1,
+        "note": "0x0C present: Healthy"
+      },
+      {
+        "name": "as5600_state",
+        "offset": 47,
+        "kind": "eq",
+        "expect": 1,
+        "note": "AS5600 present: Healthy"
+      },
+      {
+        "name": "tof_ch_rev_age",
+        "offset": 14,
+        "kind": "max",
+        "max": 300,
+        "note": "0x09 freshness: age < T_fresh 300 ms"
+      },
+      {
+        "name": "tof_pal_fwd_age",
+        "offset": 38,
+        "kind": "max",
+        "max": 300,
+        "note": "0x0C freshness: age < T_fresh 300 ms"
+      },
+      {
+        "name": "as5600_age",
+        "offset": 46,
+        "kind": "max",
+        "max": 1000,
+        "note": "AS5600 freshness: age < 1 s"
+      },
+      {
+        "name": "step_ms_max",
+        "offset": 8,
+        "kind": "max",
+        "max": 10,
+        "note": "bounded step duration: observed max < T_step 10 ms"
+      },
+      {
+        "name": "recovery_count",
+        "offset": 3,
+        "kind": "eq",
+        "expect": 0,
+        "note": "no bus recovery attempts in a healthy window (no Stuck)"
+      }
+    ]
+  }
+}

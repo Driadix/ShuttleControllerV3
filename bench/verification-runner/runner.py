@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 
 try:
-    from tools import capture, flash, identity, probe
+    from tools import capture, flash, identity, probe, readback
     from tools.identity import utcnow
 except ImportError as exc:  # pragma: no cover - environment
     sys.stderr.write(f"missing dependency: {exc}\n")
@@ -80,16 +80,21 @@ class SchemaError(RuntimeError):
 
 
 def validate_scenario(sc):
-    """Validate a scenario dict against the v1 contract. Raises SchemaError.
+    """Validate a scenario dict against the v1/v2 contract. Raises SchemaError.
 
-    Every v1 scenario must declare the expected bench board identity
+    Every scenario must declare the expected bench board identity
     (identity.board.part + 96-bit uid): identity mismatch is a bench
     misconfiguration and must be an explicit non-pass (ticket #65 Acceptance).
+
+    v2 is additive: `readback` declares a RAM observation (pinned diagnostic
+    struct, ticket #63) with explicit rules; `capture` becomes optional. The
+    runner stays generic - rule semantics live in the scenario.
     """
     if not isinstance(sc, dict):
         raise SchemaError("scenario must be a JSON object")
-    if sc.get("schemaVersion") != 1:
-        raise SchemaError(f"unsupported schemaVersion: {sc.get('schemaVersion')!r}")
+    version = sc.get("schemaVersion")
+    if version not in (1, 2):
+        raise SchemaError(f"unsupported schemaVersion: {version!r}")
     for key in ("id", "title", "type", "phase"):
         if not isinstance(sc.get(key), str) or not sc[key]:
             raise SchemaError(f"scenario.{key} must be a non-empty string")
@@ -111,8 +116,50 @@ def validate_scenario(sc):
         raise SchemaError("scenario.identity.board.part must be a non-empty string")
     uid = bident.get("uid")
     if not isinstance(uid, str) or not re.fullmatch(r"[0-9a-fA-F]{24}", uid):
-        raise SchemaError("scenario.identity.board.uid must be a 24-hex-digit "
+        raise SchemaError("scenario.identity.board.uid must be a 24-hex-char "
                           "string (96-bit device UID)")
+
+    if version == 1:
+        if not isinstance(sc.get("capture"), dict):
+            raise SchemaError("scenario.capture must be an object (v1)")
+        for key in ("port", "baud", "parity", "durationS", "maxBytes"):
+            if key not in sc["capture"]:
+                raise SchemaError(f"scenario.capture.{key} is required (v1)")
+    else:
+        rb = sc.get("readback")
+        if not isinstance(rb, dict):
+            raise SchemaError("scenario.readback must be an object (v2)")
+        if not isinstance(rb.get("addr"), int) or rb["addr"] <= 0:
+            raise SchemaError("scenario.readback.addr must be a positive int")
+        if not isinstance(rb.get("words"), int) or rb["words"] <= 0:
+            raise SchemaError("scenario.readback.words must be a positive int")
+        if not isinstance(rb.get("windowS"), (int, float)) or rb["windowS"] <= 0:
+            raise SchemaError("scenario.readback.windowS must be > 0")
+        rules = rb.get("rules")
+        if not isinstance(rules, list) or not rules:
+            raise SchemaError("scenario.readback.rules must be a non-empty list")
+        for rule in rules:
+            if not isinstance(rule, dict) or not isinstance(rule.get("name"), str):
+                raise SchemaError("readback rule must be {name, offset, ...}")
+            if not isinstance(rule.get("offset"), int) or rule["offset"] < 0:
+                raise SchemaError(f"rule {rule.get('name')!r}: offset must be >= 0")
+            kind = rule.get("kind")
+            if kind == "delta":
+                if not isinstance(rule.get("minDelta"), (int, float)):
+                    raise SchemaError(f"rule {rule.get('name')!r}: "
+                                      "delta rule needs minDelta")
+            elif kind == "eq":
+                if "expect" not in rule:
+                    raise SchemaError(f"rule {rule.get('name')!r}: eq rule needs expect")
+            elif kind == "max":
+                if not isinstance(rule.get("max"), (int, float)):
+                    raise SchemaError(f"rule {rule.get('name')!r}: max rule needs max")
+            else:
+                raise SchemaError(f"rule {rule.get('name')!r}: kind must be "
+                                  "'delta'|'eq'|'max'")
+        cap = sc.get("capture")
+        if cap is not None and not isinstance(cap, dict):
+            raise SchemaError("scenario.capture must be an object or absent (v2)")
 
     fl = sc.get("flash")
     if not isinstance(fl, dict) or not isinstance(fl.get("required"), bool):
@@ -122,56 +169,56 @@ def validate_scenario(sc):
                           "when flash.required")
 
     cap = sc.get("capture")
-    if not isinstance(cap, dict):
-        raise SchemaError("scenario.capture must be an object")
-    port = cap.get("port")
-    if not isinstance(port, str) or not port:
-        raise SchemaError("scenario.capture.port must be a non-empty string "
-                          "('auto' or a COM port)")
-    for key, typ in (("baud", int), ("durationS", (int, float)),
-                     ("maxBytes", int)):
-        val = cap.get(key)
-        if not isinstance(val, typ) or isinstance(val, bool) or val <= 0:
-            raise SchemaError(f"scenario.capture.{key} must be a positive number")
-    parity = cap.get("parity")
-    if parity not in ("N", "E", "O"):
-        raise SchemaError(f"scenario.capture.parity must be 'N'|'E'|'O', "
-                          f"got: {parity!r}")
+    if cap is not None:
+        port = cap.get("port")
+        if not isinstance(port, str) or not port:
+            raise SchemaError("scenario.capture.port must be a non-empty string "
+                              "('auto' or a COM port)")
+        for key, typ in (("baud", int), ("durationS", (int, float)),
+                         ("maxBytes", int)):
+            val = cap.get(key)
+            if not isinstance(val, typ) or isinstance(val, bool) or val <= 0:
+                raise SchemaError(f"scenario.capture.{key} must be a positive number")
+        parity = cap.get("parity")
+        if parity not in ("N", "E", "O"):
+            raise SchemaError(f"scenario.capture.parity must be 'N'|'E'|'O', "
+                              f"got: {parity!r}")
 
     o = sc.get("oracle")
-    if not isinstance(o, dict):
-        raise SchemaError("scenario.oracle must be an object")
-    min_frames = o.get("minFrames")
-    if not isinstance(min_frames, int) or isinstance(min_frames, bool) \
-            or min_frames < 0:
-        raise SchemaError("scenario.oracle.minFrames must be a non-negative integer")
-    max_bad = o.get("maxCrcBadRatio")
-    if not isinstance(max_bad, (int, float)) or isinstance(max_bad, bool) \
-            or not (0.0 <= max_bad <= 1.0):
-        raise SchemaError("scenario.oracle.maxCrcBadRatio must be in [0.0, 1.0]")
-    req = o.get("requirePatterns")
-    forb = o.get("forbidPatterns")
-    for name, pats in (("requirePatterns", req), ("forbidPatterns", forb)):
-        if not isinstance(pats, list) or not all(isinstance(p, str) for p in pats):
-            raise SchemaError(f"scenario.oracle.{name} must be a list of strings")
-        for p in pats:
-            try:
-                re.compile(p)
-            except re.error as exc:
-                raise SchemaError(f"scenario.oracle.{name} invalid regex "
-                                  f"{p!r}: {exc}")
-    if stype == "behavior":
-        # Non-vacuous rule (issue #60 section 2.1, T11): behavior must have an
-        # observable positive; silence is never PASS of behavior.
-        if min_frames < 1 and not req:
-            raise SchemaError(
-                "behavior scenario must have minFrames>=1 or non-empty "
-                "requirePatterns (vacuous PASS prohibited)")
-    else:  # flash-verify: PASS claims only flash + probe alive, never behavior
-        if min_frames != 0 or req or forb:
-            raise SchemaError(
-                "flash-verify scenario must have minFrames=0 and empty "
-                "pattern lists (no behavior claim allowed)")
+    if version == 1 and not isinstance(o, dict):
+        raise SchemaError("scenario.oracle must be an object (v1)")
+    if o is not None:
+        min_frames = o.get("minFrames")
+        if not isinstance(min_frames, int) or isinstance(min_frames, bool) \
+                or min_frames < 0:
+            raise SchemaError("scenario.oracle.minFrames must be a non-negative integer")
+        max_bad = o.get("maxCrcBadRatio")
+        if not isinstance(max_bad, (int, float)) or isinstance(max_bad, bool) \
+                or not (0.0 <= max_bad <= 1.0):
+            raise SchemaError("scenario.oracle.maxCrcBadRatio must be in [0.0, 1.0]")
+        req = o.get("requirePatterns")
+        forb = o.get("forbidPatterns")
+        for name, pats in (("requirePatterns", req), ("forbidPatterns", forb)):
+            if not isinstance(pats, list) or not all(isinstance(p, str) for p in pats):
+                raise SchemaError(f"scenario.oracle.{name} must be a list of strings")
+            for p in pats:
+                try:
+                    re.compile(p)
+                except re.error as exc:
+                    raise SchemaError(f"scenario.oracle.{name} invalid regex "
+                                      f"{p!r}: {exc}")
+        if stype == "behavior":
+            # Non-vacuous rule (issue #60 section 2.1, T11): behavior must have
+            # an observable positive; silence is never PASS of behavior.
+            if min_frames < 1 and not req:
+                raise SchemaError(
+                    "behavior scenario must have minFrames>=1 or non-empty "
+                    "requirePatterns (vacuous PASS prohibited)")
+        else:  # flash-verify: PASS claims only flash + probe alive, never behavior
+            if min_frames != 0 or req or forb:
+                raise SchemaError(
+                    "flash-verify scenario must have minFrames=0 and empty "
+                    "pattern lists (no behavior claim allowed)")
     return sc
 
 
@@ -263,6 +310,45 @@ def evaluate_oracle(scenario: dict, norm: dict):
         if not any(re.search(pat, line) for line in norm["logLines"]):
             reasons.append(f"required pattern not found: {pat}")
             return "TIMEOUT", reasons
+    return "PASS", reasons
+
+
+def evaluate_readback_oracle(scenario: dict, norm: dict):
+    """Readback (v2) verdict from two RAM snapshots. Every rule is checked:
+    eq -> word value must match; delta -> B.offset - A.offset >= minDelta;
+    max -> B.offset < max (an upper bound: freshness age, step duration).
+    A delta rule that did not accumulate within the window is TIMEOUT (the
+    firmware was not acquiring); an eq/max violation is FAIL. Returns
+    (verdict, reasons)."""
+    rb = scenario.get("readback", {})
+    rules = rb.get("rules", [])
+    snap_a = norm.get("snapA") or []
+    snap_b = norm.get("snapB") or []
+    reasons = []
+    for rule in rules:
+        off = int(rule["offset"])
+        name = rule["name"]
+        if off >= len(snap_a) or off >= len(snap_b):
+            reasons.append(f"rule {name}: offset {off} out of range")
+            continue
+        if rule["kind"] == "eq":
+            if snap_b[off] != int(rule["expect"]):
+                reasons.append(
+                    f"rule {name}: word[{off}] = {snap_b[off]} != "
+                    f"{rule['expect']}")
+        elif rule["kind"] == "max":
+            if snap_b[off] >= int(rule["max"]):
+                reasons.append(
+                    f"rule {name}: word[{off}] = {snap_b[off]} >= max "
+                    f"{rule['max']}")
+        else:  # delta
+            delta = snap_b[off] - snap_a[off]
+            if delta < int(rule["minDelta"]):
+                return "TIMEOUT", [
+                    f"rule {name}: delta {delta} < minDelta "
+                    f"{rule['minDelta']} over {rb.get('windowS')}s"]
+    if reasons:
+        return "FAIL", reasons
     return "PASS", reasons
 
 
@@ -425,11 +511,17 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
             result["reasons"].append("board probe FAIL")
             missing.append("boardIdentity")
 
-    # 3. UART port check (passive host check, mandatory evidence) - gated
+    # 3. UART port check (passive host check, mandatory v1 evidence) - gated
     #    like the probe: opening the physical port is physical interaction,
     #    so a refused run emits a skipped record instead of touching the
     #    bench (issue #60 section 0.3, hard stop before ANY physical ops).
-    if missing:
+    #    v2 readback scenarios observe RAM (ticket #63, UART is silent in
+    #    Phase 1), so the UART check is optional there.
+    has_capture = bool(scenario.get("capture"))
+    if not has_capture:
+        result["uart"] = {"port": None, "open": None,
+                          "note": "readback scenario (v2): no UART capture"}
+    elif missing:
         result["uart"] = {"port": port, "open": False,
                           "reason": "pre-flight gate failed: "
                                     + ", ".join(missing)}
@@ -471,8 +563,58 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
     if not result["firmware"].get("artifactSha256"):
         missing.append("artifactSha256")
 
-    # 6. Capture + normalize - only when evidence is still complete
-    if missing:
+    # 6. Observation: capture (v1, UART) or readback (v2, RAM snapshots).
+    if not has_capture:
+        # v2: two RAM snapshots over the observation window. read_ram_words
+        # halts the MCU (physical interaction) - gated like probe/flash: a
+        # refused run records a skipped observation, never touches the bench
+        # (issue #60 section 0.3, hard stop before ANY physical ops).
+        if missing:
+            result["capture"] = {
+                "rawPath": None, "rawBytes": 0,
+                "durationS": scenario["readback"]["windowS"],
+                "skipped": True,
+                "reason": "pre-flight evidence incomplete: "
+                          + ", ".join(missing),
+            }
+            result["normalized"] = {"snapA": [], "snapB": [],
+                                    "windowS": scenario["readback"]["windowS"]}
+        else:
+            try:
+                rb = scenario["readback"]
+                addr = int(rb["addr"])
+                words = int(rb["words"])
+                window = float(rb["windowS"])
+                # Snapshot A immediately (the flash->identity steps already
+                # elapsed; the firmware counts from reset run), B after the
+                # full window: the delta rules in the scenario accumulate
+                # over exactly `window` (review MAJOR fix, #63).
+                snap_a = readback.read_ram_words(addr, words)
+                time.sleep(window)
+                snap_b = readback.read_ram_words(addr, words)
+                a_path = out_dir / f"raw-{scenario['id']}-a.mdw"
+                b_path = out_dir / f"raw-{scenario['id']}-b.mdw"
+                a_path.write_text(
+                    "\n".join("0x%08X: %s" % (addr + i * 4, "%08X" % w)
+                              for i, w in enumerate(snap_a)) + "\n",
+                    encoding="utf-8")
+                b_path.write_text(
+                    "\n".join("0x%08X: %s" % (addr + i * 4, "%08X" % w)
+                              for i, w in enumerate(snap_b)) + "\n",
+                    encoding="utf-8")
+                result["capture"] = {"rawPath": str(a_path), "rawBytes": 0,
+                                     "durationS": window,
+                                     "snapshotPathB": str(b_path)}
+                result["normalized"] = {"snapA": snap_a, "snapB": snap_b,
+                                        "windowS": window}
+            except Exception as exc:  # noqa: BLE001 - readback failure is a result
+                result["capture"] = {"rawPath": None, "rawBytes": 0,
+                                     "durationS": scenario["readback"]["windowS"],
+                                     "error": str(exc)[-300:]}
+                result["normalized"] = {"snapA": [], "snapB": [],
+                                        "windowS": scenario["readback"]["windowS"]}
+                missing.append("capture")
+    elif missing:
         result["capture"] = {"rawPath": None, "rawBytes": 0,
                              "durationS": scenario["capture"]["durationS"]}
         result["normalized"] = dict(_EMPTY_NORM)
@@ -498,8 +640,13 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
     if not result["evidence"]["complete"]:
         result["verdict"] = "INCOMPLETE"
         result["reasons"].extend(f"missing evidence: {m}" for m in missing)
-    else:
+    elif has_capture:
         verdict, reasons = evaluate_oracle(scenario, result["normalized"])
+        result["verdict"] = verdict
+        result["reasons"] = reasons
+    else:
+        verdict, reasons = evaluate_readback_oracle(scenario,
+                                                    result["normalized"])
         result["verdict"] = verdict
         result["reasons"] = reasons
 
@@ -521,7 +668,7 @@ def check_evidence(result: dict, bundle_dir: Path) -> list:
     missing = []
     if not isinstance(result, dict):
         return ["resultNotObject"]
-    if result.get("schemaVersion") != 1:
+    if result.get("schemaVersion") not in (1, 2):
         missing.append("schemaVersion")
     if result.get("verdict") not in VERDICT_EXIT:
         missing.append("verdict")
@@ -530,7 +677,11 @@ def check_evidence(result: dict, bundle_dir: Path) -> list:
         missing.append("normalized")
     raw_name = f"raw-{result.get('scenario', {}).get('id', '?')}.bin"
     if not (bundle_dir / raw_name).exists():
-        missing.append(f"rawArtifact:{raw_name}")
+        # v2 readback scenarios write raw-<id>-a.mdw / -b.mdw snapshots.
+        raw_a = f"raw-{result.get('scenario', {}).get('id', '?')}-a.mdw"
+        raw_b = f"raw-{result.get('scenario', {}).get('id', '?')}-b.mdw"
+        if not ((bundle_dir / raw_a).exists() and (bundle_dir / raw_b).exists()):
+            missing.append(f"rawArtifact:{raw_name}")
     if result.get("evidence", {}).get("complete") is not True:
         missing.append("evidenceComplete")
     return missing
@@ -600,7 +751,7 @@ def main(argv=None) -> int:
             print("run not started (schema error before any side effect)",
                   file=sys.stderr)
             return 4
-        port = args.port or scenario["capture"].get("port") or DEFAULT_PORT
+        port = args.port or scenario.get("capture", {}).get("port") or DEFAULT_PORT
         if port == "auto":
             port = DEFAULT_PORT
         out_dir = Path(args.out_dir) if args.out_dir else (
