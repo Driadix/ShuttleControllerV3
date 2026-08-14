@@ -257,16 +257,81 @@ def decode_frames(raw: bytes):
         i = end
 
 
+# Canonical V3 frame (contract core, domain/codec.h; #47 section 4.1):
+# sync 0xE3 0x10 + header 8 B (protocol_major, msg_family, msg_type,
+# queue_class, flags, frame_seq, payload_len u16 LE) + payload + CRC16.
+V3_SYNC = bytes((0xE3, 0x10))
+V3_HDR_LEN = 8
+V3_MAX_PAYLOAD = 116
+
+# Observability family msg types (domain/codec.h MsgObservability).
+V3_MSG_NAMES = {
+    0: "TelemetryRecord",
+    1: "EventRecord",
+    2: "LogRecord",
+    3: "TraceRecord",
+    4: "SnapshotFragment",
+}
+
+
+def decode_v3_frames(raw: bytes):
+    """Yield (msg_family, msg_type, payload, crc_ok) canonical V3 frames.
+
+    Additive to decode_frames (V1): observability-uart scenario (#72) selects
+    this format; legacy scenarios keep V1. Lenient resync like V1.
+    """
+    i = 0
+    n = len(raw)
+    while i + V3_HDR_LEN + 2 <= n:
+        if raw[i] != V3_SYNC[0] or raw[i + 1] != V3_SYNC[1]:
+            i += 1
+            continue
+        payload_len = raw[i + 8] | (raw[i + 9] << 8)
+        if payload_len > V3_MAX_PAYLOAD:
+            i += 2
+            continue
+        end = i + 2 + V3_HDR_LEN + payload_len + 2
+        if end > n:
+            break
+        payload = raw[i + 2 + V3_HDR_LEN:i + 2 + V3_HDR_LEN + payload_len]
+        crc_stored = raw[end - 2] | (raw[end - 1] << 8)
+        crc_ok = crc16(raw[i + 2:i + 2 + V3_HDR_LEN + payload_len]) == crc_stored
+        yield raw[i + 3], raw[i + 4], payload, crc_ok  # (msg_family, msg_type)
+        i = end
+
+
 def decode_log(payload: bytes) -> str:
     return payload.decode("utf-8", errors="replace")
 
 
-def normalize_raw(raw: bytes):
-    """Normalize raw bytes into machine-readable frame stats + log lines."""
+def normalize_raw(raw: bytes, frame_format: str = "v1"):
+    """Normalize raw bytes into machine-readable frame stats + log lines.
+
+    frame_format: 'v1' (legacy 0xBB 0xCC bench contract) or 'v3' (canonical
+    0xE3 0x10 observability contract, #72). Additive - legacy scenarios and
+    their golden tests are untouched.
+    """
     frames_valid = 0
     frames_bad = 0
     msg_counts = {}
     log_lines = []
+    if frame_format == "v3":
+        for family, mtype, payload, ok in decode_v3_frames(raw):
+            name = V3_MSG_NAMES.get(mtype, f"FAM{family}_T{mtype}")
+            if ok:
+                frames_valid += 1
+            else:
+                frames_bad += 1
+            msg_counts[name] = msg_counts.get(name, 0) + 1
+            if ok and mtype == 2:  # LogRecord: payload = envelope + level + module + text
+                log_lines.append(decode_log(payload[16:]))
+        return {
+            "bytes": len(raw),
+            "framesValid": frames_valid,
+            "framesBad": frames_bad,
+            "msgCounts": msg_counts,
+            "logLines": log_lines,
+        }
     for msg_id, payload, ok in decode_frames(raw):
         name = MSG_NAMES.get(msg_id, f"MSG_0x{msg_id:02X}")
         if ok:
@@ -623,7 +688,8 @@ def run_loop(scenario: dict, port: str, out_dir: Path, checklist_path=None,
             raw, raw_path = capture.run_capture(scenario, port, out_dir)
             result["capture"] = {"rawPath": raw_path, "rawBytes": len(raw),
                                  "durationS": scenario["capture"]["durationS"]}
-            result["normalized"] = normalize_raw(raw)
+            fmt = scenario.get("frameFormat", "v1")  # v1 legacy | v3 canonical (#72)
+            result["normalized"] = normalize_raw(raw, fmt)
         except Exception as exc:  # noqa: BLE001 - capture failure is a result
             result["capture"] = {"rawPath": None, "rawBytes": 0,
                                  "durationS": scenario["capture"]["durationS"],
@@ -712,6 +778,9 @@ def main(argv=None) -> int:
 
     p_norm = sub.add_parser("normalize", help="decode a raw capture file")
     p_norm.add_argument("raw")
+    p_norm.add_argument("--frame-format", default="v1",
+                        choices=("v1", "v3"),
+                        help="frame contract: v1 legacy (0xBB 0xCC) | v3 canonical (0xE3 0x10, #72)")
 
     p_ev = sub.add_parser("evidence", help="re-check evidence bundle completeness")
     p_ev.add_argument("result")
@@ -739,7 +808,7 @@ def main(argv=None) -> int:
 
     if args.cmd == "normalize":
         raw = Path(args.raw).read_bytes()
-        print(json.dumps(normalize_raw(raw), ensure_ascii=False, indent=2))
+        print(json.dumps(normalize_raw(raw, args.frame_format), ensure_ascii=False, indent=2))
         return 0
 
     if args.cmd == "run":

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "observability-uart",
+  "title": "Observability UART: canonical V3 stream alive (telemetry heartbeat, events)",
+  "type": "behavior",
+  "phase": "L4",
+  "identity": {
+    "board": {
+      "part": "STM32F405RG",
+      "uid": "002900363033470336363131"
+    }
+  },
+  "frameFormat": "v3",
+  "flash": { "required": true, "env": "firmware" },
+  "capture": {
+    "port": "auto",
+    "baud": 230400,
+    "parity": "E",
+    "durationS": 20,
+    "maxBytes": 2000000
+  },
+  "oracle": {
+    "minFrames": 40,
+    "maxCrcBadRatio": 0.05,
+    "requirePatterns": [],
+    "forbidPatterns": []
+  }
+}

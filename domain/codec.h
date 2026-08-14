@@ -273,5 +273,105 @@ CodecResult decode_sub_ack(const std::uint8_t* p, std::uint16_t len, Subscriptio
 // fingerprint (design section 2.3; #13 conflict semantics).
 std::uint32_t request_fingerprint(const OperationRequest& r);
 
+// --- Observability records (design docs/observability-design-v3.md section 2;
+//     architecture #49 sections 2, 5, 8; ticket #72) ------------------------
+
+// Message types in the Observability family (additive extension of #47 section 7).
+enum class MsgObservability : std::uint8_t
+{
+    TelemetryRecord = 0,
+    EventRecord = 1,
+    LogRecord = 2,
+    TraceRecord = 3,
+    SnapshotFragment = 4,
+};
+
+// Wall-clock quality (#49 section 3): Unsynced => wall_time absent (0) and not
+// to be interpreted. SetWallClock (Service class) is outside #72.
+enum class TimeValidity : std::uint8_t
+{
+    Unsynced = 0,
+    RtcOnly = 1,
+    Synced = 2,
+};
+
+// Common envelope: first field group of every class record. Fixed per-class
+// layout (NOT dynamic): telemetry 10 B (no wall_time - ordering by tick, #49
+// section 2.2), events/logs/traces 14 B (wall_time present; 0 when Unsynced).
+// LSB-first bit packing (R7: explicit contract; wire is little-endian like
+// the whole frame). class_id is 3 bits - QueueClass 0..6 (Events=4 requires
+// 3 bits; #49 section 2.1 says "2 bits significant" - additive widening,
+// wire-compatible u8 with 5 high bits reserved/0).
+struct Envelope
+{
+    std::uint8_t class_id = 0;        // codec::QueueClass: Control..Traces (0..6)
+    TimeValidity time_validity = TimeValidity::Unsynced;
+    std::uint32_t controller_epoch = 0;
+    std::uint32_t monotonic_tick = 0; // ms from boot; sole order authority (#43, #48 s9)
+    std::uint8_t seq = 0;             // rolling per-class; loss detection mod 256
+    std::uint32_t wall_time = 0;      // epoch sec; valid only when time_validity != Unsynced
+
+    // Wire sizes.
+    static constexpr std::uint16_t SizeNoWall = 10;
+    static constexpr std::uint16_t SizeWithWall = 14;
+};
+
+// telemetry body (drop-oldest, freshness #49 section 2.2). 18 B packed.
+struct TelemetryBody
+{
+    std::uint8_t op_state = 0;
+    std::uint32_t position_mm = 0;
+    std::uint16_t speed_mm_s = 0;
+    std::uint8_t health = 0;          // safety::SafetyHealth
+    std::uint16_t fault_mask = 0;     // #47 section 16.4
+    std::uint16_t warning_mask = 0;
+    std::uint8_t battery_charge = 0;
+    std::uint16_t battery_voltage_mv = 0;
+    std::uint16_t pallet_count = 0;
+    std::uint8_t state_flags = 0;
+};
+
+// events body (drop-newest, reserved capacity #43 section 6). 12 B packed.
+struct EventBody
+{
+    std::uint16_t event_id = 0; // registry 0x01xx..0x08xx (#49 section 5)
+    std::uint8_t severity = 0;  // info/warning/error/fatal
+    std::uint8_t ctx_kind = 0;  // operationId/faultCode/dropCounter/rejectCode/updateStage...
+    std::uint32_t ctx_value = 0;
+    std::uint32_t ctx_value2 = 0;
+};
+
+// logs body (drop-newest; text <= 80 B after envelope, no chunk split).
+struct LogBody
+{
+    std::uint8_t level = 0;    // DEBUG/INFO/WARN/ERROR/FATAL
+    std::uint8_t module_id = 0;
+    std::uint8_t text[80] = {}; // bounded, truncated without chunk split
+    std::uint16_t text_len = 0;
+};
+
+// traces body header; body payload follows (fault-capture staging <= 512 B).
+struct TraceBodyHeader
+{
+    std::uint8_t kind = 0;          // 0 = fault_capture (production)
+    std::uint16_t trigger_event_id = 0;
+    std::uint32_t trigger_tick = 0;
+    std::uint32_t payload_len = 0;  // capture body length
+};
+
+// Envelope codec. with_wall selects the fixed layout (10/14 B).
+std::uint16_t encode_envelope(std::uint8_t* buf, std::uint16_t cap, const Envelope& e, bool with_wall);
+CodecResult decode_envelope(const std::uint8_t* p, std::uint16_t len, Envelope& out, bool with_wall);
+
+// Class-body codecs (LE, bounds-checked).
+std::uint16_t encode_telemetry_body(std::uint8_t* buf, std::uint16_t cap, const TelemetryBody& b);
+CodecResult decode_telemetry_body(const std::uint8_t* p, std::uint16_t len, TelemetryBody& out);
+std::uint16_t encode_event_body(std::uint8_t* buf, std::uint16_t cap, const EventBody& b);
+CodecResult decode_event_body(const std::uint8_t* p, std::uint16_t len, EventBody& out);
+std::uint16_t encode_log_body(std::uint8_t* buf, std::uint16_t cap, const LogBody& b);
+CodecResult decode_log_body(const std::uint8_t* p, std::uint16_t len, LogBody& out);
+std::uint16_t encode_trace_header(std::uint8_t* buf, std::uint16_t cap, const TraceBodyHeader& h);
+CodecResult decode_trace_header(const std::uint8_t* p, std::uint16_t len, TraceBodyHeader& out);
+
 } // namespace codec
 } // namespace v3

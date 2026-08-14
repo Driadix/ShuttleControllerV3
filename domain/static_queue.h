@@ -40,6 +40,18 @@ template <typename T, std::size_t N> class StaticQueue
         return true;
     }
 
+    // Copy of the head element without removing it (Sink::tick decision
+    // support, observability #72; dev-only use, R1-safe).
+    bool peek(T& out) const
+    {
+        if (m_size == 0)
+        {
+            return false;
+        }
+        out = m_items[m_head];
+        return true;
+    }
+
     bool empty() const { return m_size == 0; }
     bool full() const { return m_size >= N; }
     size_type size() const { return m_size; }
