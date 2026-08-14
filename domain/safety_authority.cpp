@@ -135,6 +135,11 @@ void SafetyAuthority::tick(std::uint64_t now)
             if (m_fault != SafetyFault::CrashMarker && m_fault != SafetyFault::CanFailsafe &&
                 cls == DegradedClass::None && !motion_active())
             {
+                const SafetyFault cleared = m_fault;
+                m_fault = SafetyFault::None;     // latched fault = None вне Fault (§2.5)
+                m_funnel.reset();                // release stop-intent (воронка-храповик):
+                                                 //   иначе Ready с навсегда Stop/ForceStop -
+                                                 //   движение невосстановимо (review MAJOR)
                 m_health = SafetyHealth::Degraded; // ре-квалификация; T_deg-таймер рестартует
                 m_degraded_class = DegradedClass::None;
                 m_deg_motion_ms = 0;
@@ -142,7 +147,7 @@ void SafetyAuthority::tick(std::uint64_t now)
                 if (m_events != nullptr)
                 {
                     m_events->health_changed(SafetyHealth::Fault, SafetyHealth::Degraded,
-                                             m_degraded_class, m_fault);
+                                             m_degraded_class, cleared);
                 }
             }
             break;

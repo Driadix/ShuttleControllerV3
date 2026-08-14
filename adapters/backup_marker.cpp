@@ -27,11 +27,12 @@ SafetyStateMarker::State BackupMarker::read_crash()
     const auto s = v3::safety::marker_decode(word);
     // init-штамп (Q5 A, design §2.3): CRC-fail (мусор первого boot BKP) трактуется
     // permissive «краха не было» и НЕМЕДЛЕННО перезаписывается валидным пустым
-    // маркером - мусор никогда не читается повторно. Pending-маркер сохраняется.
-    const std::uint32_t empty = v3::safety::marker_encode(v3::safety::MarkerState{});
-    if (word != empty && !s.crash_pending)
+    // маркером - мусор никогда не читается повторно. Предикат - round-trip валидности
+    // (marker_encode(decode(word)) != word => CRC-fail): валидные состояния (в т.ч.
+    // {crash_pending=false, crash_count>0}) не затираются.
+    if (v3::safety::marker_encode(s) != word)
     {
-        RTC->BKP0R = empty;
+        RTC->BKP0R = v3::safety::marker_encode(v3::safety::MarkerState{});
     }
     return s;
 }

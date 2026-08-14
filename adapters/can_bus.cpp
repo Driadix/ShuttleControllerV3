@@ -153,8 +153,16 @@ std::uint32_t CanBus::rx_drain(CanFrame* out, std::uint32_t budget)
         }
         ++n;
     }
-    // Фаза 1: RX-переполнение (drop + счётчик, #43 §4) - FIFO переполняется только
-    // при потоке > drain за тик; политика (drop + событие) - владелец Observability (#72).
+    // RX-overrun (обязательство #13, #43 §4): аппаратное переполнение FIFO0 - drop +
+    // счётчик (событие - у Observability #72). FOVR0 clear-on-write-1 (CAN_RF0R).
+    if (CAN1->RF0R & CAN_RF0R_FOVR0)
+    {
+        if (m_diag != nullptr)
+        {
+            ++m_diag->can_rx_dropped;
+        }
+        CAN1->RF0R = CAN_RF0R_FOVR0;
+    }
     return n;
 }
 

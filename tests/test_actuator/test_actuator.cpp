@@ -134,8 +134,12 @@ TEST(Actuator, StopEmissionWithinTeso)
     // Force-stop кадр - из SA-слота (T_fs, проверено T20); здесь - companion zero-кадр
     // в пределах T_emit (<= 50 ms gate): сумма <= 60 ms <= T_eso 70 ms.
     h.actuator.step(t0 + 50);
-    EXPECT_GE(h.can.tx_count(), 1u);
-    EXPECT_EQ(h.can.tx_frame(0).id, v3::safety::kCanTractionId);
+    ASSERT_GE(h.can.tx_count(), 1u);
+    const v3::CanFrame& f = h.can.tx_frame(0);
+    EXPECT_EQ(f.id, v3::safety::kCanTractionId);
+    EXPECT_EQ(f.data[0], 0u); // нулевой кадр (velocity 0)
+    EXPECT_EQ(f.data[1], 0u);
+    EXPECT_EQ(f.data[2], 0u);
 }
 
 } // namespace

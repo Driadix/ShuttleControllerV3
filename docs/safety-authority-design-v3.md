@@ -227,7 +227,7 @@ struct CanPort {
 
 ### 2.5 Safety-диагностика (`.bram_safety`, L4-наблюдаемость, паттерн #63 §5.1)
 
-Pinned-секция `.bram_safety` (0x20012000, stripped из flash, заполняется адаптерами и доменом; механизм - как `.bram_sensing`, #63). **Структура и write-функции - доменные** (`domain/diag_safety.h`, framework-free, только доменные типы: SafetyHealth, Intent, CanErrorState, SafetyDiag::FrameRecord - include-lint чист, §4.1); pinned-инстанс объявляется в platform (linker-секция `.bram_safety`), домен получает указатель `SafetyDiag*` в `init` (§5.2) и пишет в структуру напрямую (foreground). **Single-writer по полям**: SA владеет health/воронкой/safety-счётчиками (stops_issued, force_stops_issued, activity_intents_rejected) и frame-записями force-stop; ActuatorController - frame-записями 100/101/zero и can_tx_dropped; CAN-адаптер - can_state/can_tx_count/can_rx_dropped/can_bus_off_recoveries. Runner читает секцию на readback-шаге (schema v2). Состав:
+Pinned-секция `.bram_safety` (0x20012000, stripped из flash, заполняется адаптерами и доменом; механизм - как `.bram_sensing`, #63). **Структура и write-функции - доменные** (`domain/diag_safety.h`, framework-free, только доменные типы: SafetyHealth, Intent, CanErrorState, SafetyDiag::FrameRecord - include-lint чист, §4.1); pinned-инстанс объявляется в platform (linker-секция `.bram_safety`), домен получает указатель `SafetyDiag*` в `init` (§5.2) и пишет в структуру напрямую (foreground). **Single-writer по полям (уточнение имплементации, PR #71)**: SafetyAuthority - health/degraded_class/fault/state_entry_ms/degraded_motion_ms/current_intent/activity_intents_rejected/stops_issued/force_stops_issued; ActuatorController - frame records kind 0 (100/101) / kind 1 (zero) на успешный tx; CAN-адаптер - can_tx_count/can_tx_dropped/can_rx_dropped/can_bus_off_recoveries/can_state и frame records kind 2 (force-stop, адаптер владеет кадром). Runner читает секцию на readback-шаге (schema v2). Состав:
 
 ```cpp
 // domain/diag_safety.h - диагностическое зеркало (L4 evidence, schema v2); framework-free,
@@ -367,7 +367,7 @@ SafetyAuthority::tick(now):
      or current_intent.stop_profile == StopProfile::ForceStop:
       can->force_stop_tx()          # mailbox-операция в том же слоте; T_fs = T_isr + T_step
                                     #   + T_mailbox <= 10 ms (C4, #48 §2; измерение - proving #3/#13)
-      diag.force_stops_issued++; record_frame(force_stop, now)
+      diag.force_stops_issued++     # frame-запись (kind 2) делает CAN-адаптер (владеет кадром)
 ```
 
 Admission (INV-FAULT-ADMISSION, INV-SENSING-FRESH): на каждой границе шага воронка отклоняет activity intents, если `health != Ready` (motion запрещён) или направленная сенсорика не свежа. В Фазе 1 производителей activity intents нет - admission-путь проверяется host-тестами (инъекция через воронку) и счётчиком `activity_intents_rejected` в `.bram_safety`.
@@ -723,8 +723,9 @@ void ActuatorController::step(std::uint64_t now)
         m_next_gate_ms = now + m_cfg.tx_gate_ms;               // 50 ms (#48 §5)
         const CanFrame f = stopping ? zero_frame()
                           : build_actuator_frame(it);          // 100/101 или нулевой кадр-компаньон
-        if (!m_can->tx(f)) { ++m_diag->can_tx_dropped; }       // bounded per-tick budget
-        record_frame(f, stopping ? kZero : kActuator, now);
+        if (m_can->tx(f)) {                                    // бюджет/статистика (can_tx_count/
+            record_frame(f, stopping ? kZero : kActuator, now); //   can_tx_dropped) - адаптер
+        }
     }
 }
 ```

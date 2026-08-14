@@ -317,6 +317,35 @@ TEST(SafetyAuthority, AutoClearRecoveryFromFault)
     EXPECT_EQ(h.sa.health(), SafetyHealth::Ready);
 }
 
+// MAJOR-фикс ревью: после auto-clear recovery воронка освобождает stop-intent -
+// движение восстанавливается (activity velocity принимается после Ready), иначе
+// система навсегда в Ready с текущим Stop/ForceStop (функциональный тупик).
+TEST(SafetyAuthority, RecoveryRestoresMotion)
+{
+    Harness h;
+    h.init();
+    h.sa.tick(1000); // Ready
+    h.sensing.set_faulted(SensorId::TofChannelForward);
+    h.sa.tick(1100); // Degraded
+    h.sa.tick(1100 + 60'000); // Fault (DegradedTimeout) + stop CONTROLLED
+    EXPECT_TRUE(h.sa.intent_active()); // stop-intent активен в Fault
+
+    h.sensing.set_fresh_all(0); // условие снято
+    h.sa.tick(1100 + 61'000); // Degraded (ре-квалификация, воронка освобождена)
+    EXPECT_EQ(h.sa.health(), SafetyHealth::Degraded);
+    EXPECT_FALSE(h.sa.intent_active()); // stop освобождён (review MAJOR)
+    EXPECT_EQ(h.sa.fault(), SafetyFault::None); // latched fault сброшен (§2.5)
+
+    h.sa.tick(1100 + 62'000); // Ready
+    EXPECT_EQ(h.sa.health(), SafetyHealth::Ready);
+
+    // Движение восстанавливается: activity velocity принимается (fail-on-bug).
+    h.sa.arbitrate(activity_velocity());
+    EXPECT_EQ(h.diag.activity_intents_rejected, 0u);
+    EXPECT_TRUE(h.sa.intent_active());
+    EXPECT_EQ(h.sa.current_intent().kind, IntentKind::VelocitySetpoint);
+}
+
 // T28: CrashMarker не снимается ни условием, ни power-cycle (Q5 A); clear не вызывается.
 TEST(SafetyAuthority, CrashMarkerNotCleared)
 {
