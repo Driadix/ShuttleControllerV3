@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "runner": "verification-runner",
+  "scenario": {
+    "id": "sensing-acquire",
+    "schemaVersion": 2
+  },
+  "startedAt": "2026-08-14T05:32:27+00:00",
+  "board": {
+    "probe": "PASS",
+    "part": "STM32F405RG",
+    "idcode": "0x100f6413",
+    "uid": "002900363033470336363131"
+  },
+  "boardExpected": {
+    "part": "STM32F405RG",
+    "uid": "002900363033470336363131"
+  },
+  "uart": {
+    "port": null,
+    "open": null,
+    "note": "readback scenario (v2): no UART capture"
+  },
+  "firmware": {
+    "gitSha": "1c98f21039173932f1d7b2edfcd86d92752f54c8",
+    "gitDescribe": "1c98f21-dirty",
+    "artifact": "firmware.bin",
+    "artifactSha256": "3ba485adb33283dba8f14a6bce2a8336bde243cbcb2127c3eb971df138abce1c"
+  },
+  "toolchain": {
+    "platformio": "6.1.19",
+    "platform": "ststm32@17.4.0",
+    "core": "framework-arduinoststm32@4.20701.0"
+  },
+  "checklist": {
+    "schemaVersion": 1,
+    "signed": true,
+    "owner": "Driadix",
+    "at": "2026-08-14T05:16:42.761503+00:00",
+    "items": [
+      {
+        "id": "probe",
+        "text": "ST-Link V2 подключен на XT21 (SWD), питание платы подано",
+        "confirmed": true
+      },
+      {
+        "id": "sensors",
+        "text": "ToF 0x09/0x0C и AS5600 на местах по bench record; 5V сторона в порядке (владелец подтвердил)",
+        "confirmed": true
+      },
+      {
+        "id": "l1",
+        "text": "Владелец явно одобрил исполнение L1 (runner sensing-acquire, production firmware flash)",
+        "confirmed": true
+      }
+    ]
+  },
+  "flash": {
+    "ok": true,
+    "env": "firmware",
+    "durationS": 4.8
+  },
+  "capture": {
+    "rawPath": "bench\\verification-runner\\out\\l1-sensing-pass-20260814-083227\\raw-sensing-acquire-a.mdw",
+    "rawBytes": 0,
+    "durationS": 10.0,
+    "snapshotPathB": "bench\\verification-runner\\out\\l1-sensing-pass-20260814-083227\\raw-sensing-acquire-b.mdw"
+  },
+  "normalized": {
+    "snapA": [
+      1397050963,
+      2,
+      2391,
+      0,
+      151,
+      140,
+      0,
+      0,
+      2,
+      151,
+      281,
+      0,
+      1773,
+      478,
+      0,
+      1,
+      71,
+      0,
+      0,
+      2391,
+      0,
+      0,
+      4294967295,
+      3,
+      0,
+      70,
+      1,
+      0,
+      0,
+      0,
+      4294967295,
+      3,
+      0,
+      70,
+      1,
+      0,
+      2073,
+      446,
+      9,
+      1,
+      70,
+      0,
+      0,
+      2382,
+      4028,
+      4049,
+      86,
+      1,
+      10,
+      0,
+      0,
+      2305
+    ],
+    "snapB": [
+      1397050963,
+      2,
+      12631,
+      0,
+      791,
+      740,
+      0,
+      0,
+      2,
+      791,
+      1481,
+      0,
+      1772,
+      479,
+      0,
+      1,
+      371,
+      0,
+      0,
+      12631,
+      0,
+      0,
+      4294967295,
+      3,
+      0,
+      370,
+      1,
+      0,
+      0,
+      0,
+      4294967295,
+      3,
+      0,
+      370,
+      1,
+      0,
+      2069,
+      443,
+      9,
+      1,
+      370,
+      0,
+      0,
+      12622,
+      4055,
+      4052,
+      86,
+      1,
+      50,
+      0,
+      0,
+      12545
+    ],
+    "windowS": 10.0
+  },
+  "verdict": "PASS",
+  "reasons": [],
+  "evidence": {
+    "complete": true,
+    "missing": [],
+    "resultPath": "bench/verification-runner/out/l1-sensing-pass-20260814-083227/result-sensing-acquire.json"
+  },
+  "finishedAt": "2026-08-14T05:32:45+00:00"
+}
