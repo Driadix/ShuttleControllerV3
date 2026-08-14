@@ -10,33 +10,6 @@
 namespace slice
 {
 
-// CAN adapter (issue #43 section 4): bounded TX (<= 16 frames/tick), bounded
-// RX drain (<= 64 frames/tick), force-stop on a dedicated mailbox with the
-// minimum extended ID, outside all queues.
-struct CanPort
-{
-    struct Frame
-    {
-        std::uint32_t id = 0;   // extended ID
-        std::uint8_t data[8] = {};
-        std::uint8_t len = 0;
-    };
-
-    // Bounded TX: returns false when the per-tick budget is exhausted.
-    virtual bool tx(const Frame& frame) = 0;
-
-    // Bounded RX drain: pops at most `budget` frames; returns number drained.
-    virtual std::uint32_t rx_drain(Frame* out, std::uint32_t budget) = 0;
-
-    // Fault-injection hook (harness L1): pushes a frame into the RX path as if
-    // received from the bus. Target adapter implements it as a test hook
-    // behind a compile-time flag; host fakes implement it directly.
-    virtual void inject_rx(const Frame& frame) = 0;
-
-    // Force-stop: dedicated mailbox, lowest extended ID on the bus.
-    virtual void force_stop_tx() = 0;
-};
-
 // UART transport adapter: byte budget per tick (display 230, radio 57, BMS 10).
 // Never blocks: DMA or producer-budget (issue #43 section 4, obligation #12).
 struct UartPort
@@ -160,5 +133,69 @@ struct I2cPort
     // Raw last Wire/HAL status of the last transaction (diagnostics/evidence).
     virtual std::uint8_t last_wire_status() const = 0;
 };
+
+// CAN adapter (design docs/safety-authority-design-v3.md section 2.4; #43 §4,
+// #48 §7, Q7.1). Bounded TX/RX, force-stop на выделенном mailbox с минимальным
+// extended ID (INV-FORCE-STOP-CHANNEL). Production-форма slice::CanPort
+// (убран inject_rx - test-хук не production API; добавлен error_state - Q7.1).
+enum class CanErrorState : std::uint8_t
+{
+    Active = 0,       // нормальная работа (error counters < 128)
+    ErrorPassive = 1, // >= 128 ошибок: шина де-факто недоступна для команд (Q7.1)
+    BusOff = 2,       // >= 256 ошибок: контроллер отсоединён от шины (RM0090 §32)
+};
+
+struct CanFrame
+{
+    std::uint32_t id = 0; // extended ID
+    std::uint8_t data[8] = {};
+    std::uint8_t len = 0;
+};
+
+struct CanPort
+{
+    // Bounded TX: <= 16 кадров/тик (#48 §7); false при исчерпании бюджета тика.
+    // Никогда не блокирует дольше bounded-интервала (ABRQ abort pending TX, RM0090 §32.7).
+    virtual bool tx(const CanFrame& frame) = 0;
+    // Bounded RX drain: до `budget` кадров; возвращает число. RX-переполнение -
+    // drop + счётчик (#43 §4: политика RX-переполнения - drop + событие).
+    virtual std::uint32_t rx_drain(CanFrame* out, std::uint32_t budget) = 0;
+    // Force-stop: выделенный TX mailbox, минимальный extended ID (INV-FORCE-STOP-CHANNEL,
+    // #43 §4); вне очередей control-класса. Повторяемая трансляция - обязанность
+    // вызывающего (SA на каждой safety-границе, пока force-stop текущий - «всегда транслируем»).
+    virtual void force_stop_tx() = 0;
+    // Текущий error-state (Q7.1 mitigation: error counters, bus-off recovery).
+    virtual CanErrorState error_state() const = 0;
+    // Bounded re-integration после bus-off (128 x 11 recessive-бит, RM0090 §32.7).
+    // Вызывается SA на bus-off; fault остаётся до явного reset (HZ-03, #45).
+    virtual void recover_bus_off() = 0;
+};
+
+// Persisted crash-маркер (Q5 A; design §2.3). Backup SRAM, одно 32-bit слово
+// (payload + CRC16, атомарный store). read-only на стартапе: read_crash НЕ снимает
+// маркер (power-cycle != acknowledgment); clear_crash - только явный reset-error
+// acknowledgment после реквалификации (Service, Фаза 2+).
+struct SafetyStateMarker
+{
+    struct State
+    {
+        bool crash_pending = false;
+        std::uint32_t crash_count = 0;
+    };
+    virtual void write_crash(std::uint32_t crash_count) = 0; // latch crash-класса (Фаза 2+)
+    virtual State read_crash() = 0;                          // стартап, read-only
+    virtual void clear_crash() = 0;                          // только явный ack (Фаза 2+)
+};
+
+// ---------------------------------------------------------------------------
+// Reserved ports (contract declared, producers land in later slices; no
+// implementation in #71 - see design §4.2):
+//   - BumperEvents (Фаза 2+): bounded ring bumper-событий (#43 §3.2; ISR пишет
+//     только в свой ring). Потребитель - Safety Authority (latch + crash counter +
+//     force-stop, HZ-02). В #71 производитель отсутствует - GPIO-адаптер.
+//   - LeaseEvents (#77 Manual Session): expiry-событие manual lease (#43 §3.1).
+//     Потребитель - Safety Authority (INV-LEASE-STOP: expiry -> stop-intent
+//     CONTROLLED bounded). Производитель - Manual Session.
+// ---------------------------------------------------------------------------
 
 } // namespace v3

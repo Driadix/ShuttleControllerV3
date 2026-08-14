@@ -100,7 +100,15 @@ constexpr std::uint8_t As5600Addr = 0x36u;
 constexpr std::uint8_t As5600RawAngleReg = 0x0Cu;
 constexpr std::uint8_t As5600AngleReg = 0x0Eu;
 
-class SensingService
+// Read-only view of sensing observations (design docs/safety-authority-design-v3.md
+// section 7.2: Safety Authority depends on the abstraction, not the concrete service,
+// so host tests inject scripted snapshots via a fake). Implemented by SensingService.
+struct SensingView
+{
+    virtual bool get_snapshot(SensorId id, SensorSnapshot* out) const = 0;
+};
+
+class SensingService : public SensingView
 {
   public:
     // Startup (foreground, after kernel::init): clears snapshots/schedule.
@@ -116,7 +124,7 @@ class SensingService
     std::uint32_t next_step_ms() const { return m_cfg.tof_slot_ms; }
 
     // Snapshot query (foreground). Returns false for an out-of-range id.
-    bool get_snapshot(SensorId id, SensorSnapshot* out) const;
+    bool get_snapshot(SensorId id, SensorSnapshot* out) const override;
 
     // Total recover() calls (observable, L4 evidence).
     std::uint32_t recovery_count() const { return m_recovery_count; }
