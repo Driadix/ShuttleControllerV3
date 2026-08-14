@@ -31,16 +31,6 @@ constexpr std::uint32_t kBusHz = 100000u;
 constexpr std::uint32_t kSdaMask = 1u << 11;
 constexpr std::uint32_t kSclMask = 1u << 10;
 
-// Idle I2C lines are both high. A low line means the bus is held (e.g.
-// unpowered sensors pulling SDA/SCL down - the bench 5V-side loss, design
-// section 10): skip the Wire transaction entirely and report Stuck, because
-// STM32duino busy-spins up to I2C_TIMEOUT_TICK (100 ms) inside
-// endTransmission/requestFrom on a held bus - an unbounded step violation.
-bool bus_idle()
-{
-    return (GPIOB->IDR & (kSdaMask | kSclMask)) == (kSdaMask | kSclMask);
-}
-
 // Manual open-drain SCL toggling for recover() (obligation #14: <= 16 SCL
 // pulses). PB10 (SCL) / PB11 (SDA) are switched to GPIO output open-drain;
 // AFR (AF4) is restored afterwards so Wire keeps working.
@@ -85,13 +75,11 @@ I2cResult I2cBus::read(std::uint8_t device, std::uint8_t reg,
     {
         return I2cResult::Short;
     }
-    if (!bus_idle())
-    {
-        // Bus held low (stuck): report Stuck without a blocking Wire call -
-        // the Sensing Service schedules recover() with its cooldown.
-        m_last_wire_status = 4u; // HAL busy/error class
-        return I2cResult::Stuck;
-    }
+    // No bus-level pre-flight here: a GPIO IDR check is NOT a reliable stuck
+    // indicator on this bench - the SDA/SCL lines read LOW (IDR bits 10/11
+    // = 0) while the firmware runs and HIGH when halted, yet transactions
+    // succeed either way (bench evidence 2026-08-14, design section 10).
+    // Stuck is classified from the Wire/HAL outcome only (tx=1/4/5).
 
     Wire.beginTransmission(device);
     if (Wire.write(reg) != 1u)

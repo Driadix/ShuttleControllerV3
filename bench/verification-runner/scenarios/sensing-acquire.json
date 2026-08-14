@@ -15,7 +15,7 @@
     "env": "firmware"
   },
   "readback": {
-    "addr": 536879104,
+    "addr": 536940544,
     "words": 52,
     "windowS": 10,
     "rules": [
@@ -23,7 +23,7 @@
         "name": "magic",
         "offset": 0,
         "kind": "eq",
-        "expect": 1397057875,
+        "expect": 1397050963,
         "note": "0x53454E53 'SENS' - live production diagnostic struct"
       },
       {
@@ -70,7 +70,7 @@
       },
       {
         "name": "tof_pal_fwd_state",
-        "offset": 43,
+        "offset": 39,
         "kind": "eq",
         "expect": 1,
         "note": "0x0C present: Healthy"
