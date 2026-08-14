@@ -20,9 +20,15 @@
 #include "adapters/reset_cause.h"
 #include "adapters/tim2_clock.h"
 #include "domain/actuator.h"
+#include "domain/queues.h"
+#include "domain/runtime.h"
 #include "domain/safety_authority.h"
+#include "domain/semantic.h"
 #include "domain/sensing.h"
+#include "domain/slot.h"
+#include "domain/subscriptions.h"
 #include "platform/actuation_schedule.h"
+#include "platform/admission_glue.h"
 #include "platform/execution_core.h"
 #include "platform/monotonic.h"
 #include "platform/safety_glue.h"
@@ -69,6 +75,68 @@ class SafetyEventsStub : public v3::safety::SafetyAuthority::Events
 KernelEventsStub g_events;
 SafetyEventsStub g_safety_events;
 
+// Semantic/runtime slice (#74, design docs/operation-runtime-design-v3.md):
+// inbound queue, subscription registry, exclusive slot, type registry
+// (EMPTY until Phase 3), Operation Runtime, Semantic Contract and the glue
+// context. Phase-2-start wiring: gate ports are stubs (epoch/window/
+// provisioning fixed; health is REAL - SafetyAuthority), events/outbound are
+// no-op until #72 (Producer/Sink); the handshake grant is empty (authorityId
+// 0) until #75 lands - all mutating requests answer HandshakeRequired, which
+// is the correct pre-handshake behavior (#47 section 5.1).
+v3::queue::InboundQueue g_inbound;
+v3::subscription::Registry g_subscriptions;
+v3::slot::ExclusiveSlot g_slot;
+v3::semantic::TypeRegistry g_types;
+v3::runtime::Runtime g_runtime;
+v3::semantic::SemanticContract g_semantic;
+v3::glue::SemanticContext g_glue_ctx;
+
+// Gate stubs (#74, Phase-2 start; #76 lifecycle wiring replaces them).
+class EpochStub : public v3::EpochSource
+{
+  public:
+    std::uint32_t epoch() const override { return 1; } // fixed boot instance (#76 owns the real one)
+};
+class WindowStub : public v3::WindowSource
+{
+  public:
+    v3::PlatformWindow window() const override { return v3::PlatformWindow::Serving; }
+};
+class ProvisioningStub : public v3::ProvisioningSource
+{
+  public:
+    v3::ProvisioningStatus status() const override { return v3::ProvisioningStatus::Provisioned; }
+};
+class HealthAdapter : public v3::HealthSource // REAL: Safety Authority #71
+{
+  public:
+    v3::safety::SafetyHealth health() const override { return g_sa.health(); }
+};
+class RuntimeEventsStub : public v3::RuntimeEvents
+{
+  public:
+    void admission_rejected(std::uint8_t) override {}
+    void request_duplicate(std::uint32_t, bool) override {}
+    void transport_error(v3::codec::TransportError) override {}
+    void queue_rejected(v3::codec::QueueClass) override {}
+    void operation_started(std::uint32_t, std::uint16_t) override {}
+    void operation_terminal(std::uint32_t, std::uint16_t, std::uint16_t) override {}
+    void subscription_changed(std::uint16_t, bool) override {}
+    void subscription_drop(std::uint8_t) override {}
+};
+class OutboundStub : public v3::OutboundControl
+{
+  public:
+    bool enqueue(v3::codec::QueueClass, const std::uint8_t*, std::uint32_t) override { return true; }
+};
+
+EpochStub g_epoch;
+WindowStub g_window;
+ProvisioningStub g_provisioning;
+HealthAdapter g_health;
+RuntimeEventsStub g_runtime_events;
+OutboundStub g_outbound;
+
 } // namespace
 
 void setup()
@@ -108,6 +176,23 @@ void setup()
                          static_cast<std::uint32_t>(now));
     // Actuation step is armed by the safety slot on the first active intent
     // (idle = silence on the bus, Q7.1 A) - no startup schedule needed.
+
+    // Semantic/runtime slice (#74): wire gate ports, events, outbound, the
+    // single (empty) handshake grant and the runtime into the contract, then
+    // arm the two self-repeating steps (inbound drain + runtime advance).
+    g_subscriptions.init(/*profile=*/0, &g_runtime_events); // network_bridge default
+    g_runtime.init(&g_epoch, &g_runtime_events, &g_slot);
+    g_semantic.init(&g_epoch, &g_window, &g_health, &g_provisioning, &g_runtime_events,
+                    &g_outbound, &g_runtime, &g_subscriptions, &g_types,
+                    v3::semantic::Grant{}); // empty grant: HandshakeRequired until #75
+    g_glue_ctx.inbound = &g_inbound;
+    g_glue_ctx.semantic = &g_semantic;
+    g_glue_ctx.runtime = &g_runtime;
+    g_glue_ctx.events = &g_runtime_events;
+    v3::kernel::schedule(&v3::glue::inbound_tick, &g_glue_ctx,
+                         static_cast<std::uint32_t>(v3::monotonic::now_ms() + 1));
+    v3::kernel::schedule(&v3::glue::runtime_tick, &g_glue_ctx,
+                         static_cast<std::uint32_t>(v3::monotonic::now_ms() + 1));
 }
 
 void loop()
