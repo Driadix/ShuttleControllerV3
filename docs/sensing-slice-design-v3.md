@@ -10,7 +10,15 @@
 
 ## 0. Решения владельца (HITL-брифинг тикета #63)
 
-> Заполняется после брифинга владельца (см. resolution-комментарий тикета). Прототип-факты: `bench/sensing-proto/` (коммит dcb62b3); live-run на стенде 2026-08-13 не завершён - 5V/GNDREF сторона стенда обесточена, владелец уточняет физическое состояние (см. §10).
+> Решения приняты владельцем 2026-08-13 (брифинг: PR #94, комментарий тикета #63):
+>
+> 1. **Планирование** - самоперепланирующийся bounded шаг 8 ms (ToF RR + AS5600 в слоте по периоду), расписание в composition root (`platform/sensing_schedule.cpp`), домен framework-free. **Принято.**
+> 2. **`v3::I2cPort`** - production-форма порта, clean cutover из `slice::I2cPort`. **Принято.**
+> 3. **L4-наблюдаемость** - RAM read-back: production-диагностическая секция `.bram_sensing` (снапшоты + счётчики, pinned 0x20011000, stripped из flash) + runner сценарий `sensing-acquire` (schema v2), исполняется на стенде. **Принято, L1 исполняется 2026-08-13.**
+> 4. **Typed faults** - доменные enum в слайсе; wire-маппинг по реестру #47 §16.4 аддитивно, когда готов. **Принято.**
+> 5. **Recovery** - ручной open-drain ≤16 SCL + STOP + reinit при освобождении, cooldown ≥5 s в домене; I2C-инициализация V1-стилем (setSDA/setSCL+begin+setClock - эмпирический факт, §10). **Принято.**
+
+Прототип-факты: `bench/sensing-proto/` (коммит dcb62b3); live-run 2026-08-13: init-стиль begin(sda,scl) давал Stuck на живой шине, V1-стиль читает датчики (0x09/0x0C/AS5600 Healthy, ToF 1479 µs).
 
 ## 1. Место в архитектуре
 
@@ -117,12 +125,15 @@ struct SensorSnapshot {
     std::uint32_t raw;            // ToF: distance mm (dis @0x24); AS5600: angle (RAW @0x0C)
     std::uint32_t raw2;           // ToF: signal_strength @0x2A; AS5600: ANGLE @0x0E (processed)
     std::uint64_t sample_ms;      // monotonic момент успешного sample (0 = никогда)
+    bool has_sample;              // есть успешный sample (sample_ms=0 легален)
     std::uint32_t age_ms;         // now - sample_ms (0xFFFFFFFF если никогда)
     HealthState state;
     SensorFault fault;
     std::uint8_t consecutive_failures;
     std::uint8_t consecutive_successes;
     std::uint8_t last_status;     // I2cResult/статус последней попытки
+    std::uint32_t samples_ok;     // lifetime успешные sample (монотонно, никогда не
+    std::uint32_t samples_fail;   //   сбрасывается) - для observability/L1 каденции
 };
 
 struct SensingConfig {
@@ -443,6 +454,7 @@ flowchart TD
 | T14 | test_sensing | ISR-граница: i2c TU не вызывает kernel/sensing (нет вызовов из ISR-пути) | include-lint + nm-проверка символов | host |
 | T15 | test_sensing | Busy (BMS-quiet): слот пропущен без изменения state; следующий Ok продолжает каденцию | FakeI2cPort busy, assert | host |
 | T16 | test_sensing | Glue перевооружается после длинного шага: залипшая шина (read продвигает часы на 100 ms, busy-спин STM32duino) не убивает расписание - свежий now + перепланирование, следующий слот исполняется; recover#1 на первом Stuck, cooldown держится | kernel host + schedule_tick + FakeI2cPort(advance), assert queue/чтения | host |
+| T17 | test_sensing | L1-зеркало diag_words: 52-словная структура (magic/version/uptime/recovery_count@3, step@8-10, сенсоры base 12+8i: raw/raw2/age/state/samples_ok/samples_fail/last_status/sample_ms), суммарные счётчики совпадают с per-sensor lifetime | прямые assert, чистая функция | host |
 | L1 | L4 | Acquisition cadence, bounded step, stale/fault/recovery transitions на реальных датчиках; raw + normalized evidence | runner sensing-сценарий (RAM read-back, §5.1) | L4 |
 
 ## 8. Vertical slice граница (#63)

@@ -73,6 +73,8 @@ struct SensorSnapshot
     std::uint8_t consecutive_failures = 0;
     std::uint8_t consecutive_successes = 0;
     std::uint8_t last_status = 0;     // I2cResult of the last attempt
+    std::uint32_t samples_ok = 0;     // lifetime successful samples (monotonic, for
+    std::uint32_t samples_fail = 0;   //   observability/L1 cadence, never reset)
 };
 
 // Budgets (issue #48 sections 2/5, pre-allocated #43): NOT re-designed here.

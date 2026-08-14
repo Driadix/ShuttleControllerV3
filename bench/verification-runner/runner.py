@@ -151,9 +151,12 @@ def validate_scenario(sc):
             elif kind == "eq":
                 if "expect" not in rule:
                     raise SchemaError(f"rule {rule.get('name')!r}: eq rule needs expect")
+            elif kind == "max":
+                if not isinstance(rule.get("max"), (int, float)):
+                    raise SchemaError(f"rule {rule.get('name')!r}: max rule needs max")
             else:
                 raise SchemaError(f"rule {rule.get('name')!r}: kind must be "
-                                  "'delta'|'eq'")
+                                  "'delta'|'eq'|'max'")
         cap = sc.get("capture")
         if cap is not None and not isinstance(cap, dict):
             raise SchemaError("scenario.capture must be an object or absent (v2)")
@@ -312,9 +315,10 @@ def evaluate_oracle(scenario: dict, norm: dict):
 
 def evaluate_readback_oracle(scenario: dict, norm: dict):
     """Readback (v2) verdict from two RAM snapshots. Every rule is checked:
-    eq -> word value must match; delta -> B.offset - A.offset >= minDelta.
+    eq -> word value must match; delta -> B.offset - A.offset >= minDelta;
+    max -> B.offset < max (an upper bound: freshness age, step duration).
     A delta rule that did not accumulate within the window is TIMEOUT (the
-    firmware was not acquiring); an eq mismatch is FAIL. Returns
+    firmware was not acquiring); an eq/max violation is FAIL. Returns
     (verdict, reasons)."""
     rb = scenario.get("readback", {})
     rules = rb.get("rules", [])
@@ -332,6 +336,11 @@ def evaluate_readback_oracle(scenario: dict, norm: dict):
                 reasons.append(
                     f"rule {name}: word[{off}] = {snap_b[off]} != "
                     f"{rule['expect']}")
+        elif rule["kind"] == "max":
+            if snap_b[off] >= int(rule["max"]):
+                reasons.append(
+                    f"rule {name}: word[{off}] = {snap_b[off]} >= max "
+                    f"{rule['max']}")
         else:  # delta
             delta = snap_b[off] - snap_a[off]
             if delta < int(rule["minDelta"]):

@@ -232,9 +232,11 @@ TEST_F(SensingTest, Cadence)
     {
         ASSERT_TRUE(m_svc.get_snapshot(static_cast<SensorId>(id), &s));
         EXPECT_EQ(s.consecutive_successes, 25u);
+        EXPECT_EQ(s.samples_ok, 25u); // lifetime counter mirrors successes
     }
     ASSERT_TRUE(m_svc.get_snapshot(SensorId::As5600, &s));
     EXPECT_EQ(s.consecutive_successes, 4u); // 0, 250, 500, 750 ms
+    EXPECT_EQ(s.samples_ok, 4u);
 }
 
 // T3: Ok -> snapshot updated (raw/raw2, sample_ms, Healthy). Sensor 0x09 is
@@ -594,6 +596,47 @@ TEST_F(SensingTest, BusySlotSkipped)
 }
 
 } // namespace
+
+// T17: L1 diagnostic mirror (diag_words) - the 52-word readback struct the
+// runner checks (magic/version, summed counters, per-sensor snapshots at
+// header 12 + 8 words per sensor). Host-testable, pure.
+TEST_F(SensingTest, DiagnosticMirrorLayout)
+{
+    std::uint8_t b[16] = {};
+    tof_block(b, 1500u, 100u);
+    m_i2c.queue(v3::I2cResult::Ok, b, 13);  // read 0: 0x09 ok
+    m_i2c.queue(v3::I2cResult::Ok, b, 13);  // read 1,2: as5600 startup
+    m_i2c.queue(v3::I2cResult::Ok, b, 13);
+    m_i2c.queue(v3::I2cResult::NoAck);      // read 3: 0x0A noack
+    m_i2c.queue(v3::I2cResult::NoAck);      // read 4: 0x0B noack
+    m_i2c.queue(v3::I2cResult::Ok, b, 13);  // read 5: 0x0C ok
+    m_i2c.queue(v3::I2cResult::Ok, b, 13);  // read 6: 0x09 ok
+    m_svc.step(0);
+    m_svc.step(8);
+    m_svc.step(16);
+    m_svc.step(24);
+    m_svc.step(32);
+
+    std::uint32_t out[52] = {};
+    ASSERT_EQ(v3::sensing::diag_words(m_svc, 5000u, out, 52u), 52u);
+    EXPECT_EQ(out[0], 0x53454E53u);  // magic 'SENS'
+    EXPECT_EQ(out[1], 2u);           // production version
+    EXPECT_EQ(out[2], 5000u);        // uptime
+    EXPECT_EQ(out[3], 0u);           // recovery_count (no Stuck in the test)
+    EXPECT_EQ(out[8], 0u);           // step duration filled by schedule_tick
+    // Sensor 0 (0x09): raw@12, state@15 (Healthy), samples_ok@16 (2).
+    EXPECT_EQ(out[12], 1500u);
+    EXPECT_EQ(out[15], 1u);
+    EXPECT_EQ(out[16], 2u);
+    // Sensor 1 (0x0A): one noack, no sample -> Starting (0), samples_ok@20 = 0.
+    EXPECT_EQ(out[20], 0u);
+    // AS5600 (sensor 4): one startup service Ok -> samples_ok@48 = 1.
+    EXPECT_EQ(out[48], 1u);
+    // Summed counters match the per-sensor lifetime counters (ok words:
+    // s0@16, s1@24, s2@32, s3@40, s4@48; fail words: +1 each).
+    EXPECT_EQ(out[4], out[16] + out[24] + out[32] + out[40] + out[48]);
+    EXPECT_EQ(out[5], out[17] + out[25] + out[33] + out[41] + out[49]);
+}
 
 // T16: composition-root glue re-arms after a long step - a stuck bus (every
 // read advances the clock by 100 ms, modelling the STM32duino busy-spin)

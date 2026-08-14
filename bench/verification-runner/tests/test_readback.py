@@ -72,6 +72,18 @@ class TestValidateV2(unittest.TestCase):
         with self.assertRaises(SchemaError):
             validate_scenario(sc)
 
+    def test_max_rule_needs_max(self):  # T19e
+        sc = v2_scenario()
+        sc["readback"]["rules"][0] = {"name": "x", "offset": 0, "kind": "max"}
+        with self.assertRaises(SchemaError):
+            validate_scenario(sc)
+
+    def test_max_rule_valid(self):  # T19f
+        sc = v2_scenario()
+        sc["readback"]["rules"][0] = {"name": "x", "offset": 14, "kind": "max",
+                                      "max": 300}
+        self.assertEqual(validate_scenario(sc), sc)
+
     def test_bad_version(self):
         sc = v2_scenario(schemaVersion=3)
         with self.assertRaises(SchemaError):
@@ -112,6 +124,32 @@ class TestReadbackOracle(unittest.TestCase):
         verdict, reasons = evaluate_readback_oracle(v2_scenario(), snap(words))
         self.assertEqual(verdict, "TIMEOUT")
         self.assertIn("tof_cadence", reasons[0])
+
+    def test_max_pass(self):  # T22b
+        sc = v2_scenario()
+        sc["readback"]["rules"].append(
+            {"name": "age", "offset": 14, "kind": "max", "max": 300})
+        words = [0] * 52
+        words[0] = 0x53454E53
+        words[16] = 200
+        words[23] = 3
+        words[14] = 12  # fresh
+        verdict, reasons = evaluate_readback_oracle(sc, snap(words))
+        self.assertEqual(verdict, "PASS")
+        self.assertEqual(reasons, [])
+
+    def test_max_fail(self):  # T22c
+        sc = v2_scenario()
+        sc["readback"]["rules"].append(
+            {"name": "age", "offset": 14, "kind": "max", "max": 300})
+        words = [0] * 52
+        words[0] = 0x53454E53
+        words[16] = 200
+        words[23] = 3
+        words[14] = 500  # stale
+        verdict, reasons = evaluate_readback_oracle(sc, snap(words))
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("age", reasons[0])
 
 
 class TestEvidenceV2(unittest.TestCase):

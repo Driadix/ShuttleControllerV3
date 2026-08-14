@@ -151,6 +151,10 @@ void SensingService::record_success(SensorId id, std::uint64_t now, std::uint32_
     {
         ++s.consecutive_successes;
     }
+    if (s.samples_ok < 0xFFFFFFFFu)
+    {
+        ++s.samples_ok;
+    }
     if (s.state == HealthState::Faulted || s.state == HealthState::Recovering)
     {
         s.state = (s.consecutive_successes >= m_cfg.recovery_successes)
@@ -173,6 +177,10 @@ void SensingService::record_failure(SensorId id, std::uint64_t now, SensorFault 
     if (s.consecutive_failures < 0xFFu)
     {
         ++s.consecutive_failures;
+    }
+    if (s.samples_fail < 0xFFFFFFFFu)
+    {
+        ++s.samples_fail;
     }
     const bool was_faulted = (s.state == HealthState::Faulted || s.state == HealthState::Recovering);
     if (was_faulted || s.consecutive_failures >= m_cfg.fault_threshold)
