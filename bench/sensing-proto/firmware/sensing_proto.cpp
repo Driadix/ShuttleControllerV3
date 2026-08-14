@@ -297,8 +297,13 @@ void setup()
     g_diag.magic = kMagic;
     g_diag.version = kVersion;
 
-    // I2C1 on PB11 (SDA) / PB10 (SCL), 100 kHz (netlist, bench record #73).
-    Wire.begin(PB11, PB10);
+    // I2C init in the WORKING V1 style (Cntrl_V2 initTofI2cBus, proven on the
+    // bench 2026-08-13): setSDA/setSCL + begin() + setClock. The earlier
+    // prototype used Wire.begin(PB11, PB10) which produced tx=4 (Stuck) on
+    // the same bus - this run checks whether the init call style matters.
+    Wire.setSDA(PB11);
+    Wire.setSCL(PB10);
+    Wire.begin();
     Wire.setClock(100000UL);
 }
 
@@ -306,10 +311,10 @@ void loop()
 {
     const std::uint32_t now = millis();
 
-    // Diagnostic auto-switch: after 2 s with zero successful reads, re-init
-    // Wire on the alternate F405 I2C pair (PB7/PB6 = I2C1) and reset the
-    // transaction counters. Covers both wiring hypotheses in one run.
-    if (g_wire_variant == 0U && now > 2000U && g_diag.i2c_reads == 0U)
+    // Diagnostic auto-switch is DISABLED in this run (V1-style init probe):
+    // the bus stays on PB11/PB10; g_wire_variant stays 0 so the header
+    // reports which init style was active.
+    if (false && g_wire_variant == 0U && now > 2000U && g_diag.i2c_reads == 0U)
     {
         Wire.end();
         Wire.begin(PB7, PB6);

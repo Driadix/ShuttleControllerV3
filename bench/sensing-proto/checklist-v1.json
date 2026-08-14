@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "signed": true,
+  "owner": "Driadix",
+  "at": "2026-08-14T04:57:42.389017+00:00",
+  "items": [
+    {
+      "id": "probe",
+      "text": "ST-Link V2 подключен на XT21 (SWD), питание платы подано",
+      "confirmed": true
+    },
+    {
+      "id": "sensors",
+      "text": "ToF 0x09/0x0C и AS5600 на местах по bench record; питание 5V стороны в порядке (владелец проверил)",
+      "confirmed": true
+    },
+    {
+      "id": "flash-v1",
+      "text": "Владелец явно запросил загрузку старого рабочего варианта (Cntrl_V2) для диагностики",
+      "confirmed": true
+    }
+  ]
+}

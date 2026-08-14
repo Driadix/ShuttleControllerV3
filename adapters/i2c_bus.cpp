@@ -64,7 +64,17 @@ void gpio_output_od(bool enabled)
 
 void I2cBus::init()
 {
-    Wire.begin(kSdaPin, kSclPin);
+    // Init in the WORKING V1 style (Cntrl_V2 initTofI2cBus, proven on the
+    // bench 2026-08-13): setSDA/setSCL + begin() + setClock. The earlier
+    // Wire.begin(PB11, PB10) form produced tx=4 (Stuck) on the very same
+    // bus with the same pins - empirically broken on this core (4.20701.0),
+    // documented in the design doc section 10. PB11/PB10 are Arduino-style
+    // pin numbers in the generic F405RG variant (PB11=27, PB10=26), so the
+    // setSDA(PinName) overload is not selected; the observable difference
+    // is the init call style, not the pins (verified: GPIO AF4/OD/IDR=1).
+    Wire.setSDA(kSdaPin);
+    Wire.setSCL(kSclPin);
+    Wire.begin();
     Wire.setClock(kBusHz);
 }
 
