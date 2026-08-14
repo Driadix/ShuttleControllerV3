@@ -140,11 +140,15 @@ class Producer : public KernelEvents, public RuntimeEvents,
     void set_now(std::uint32_t now_ms) { m_now_ms = now_ms; }
     std::uint32_t now_ms() const { return m_now_ms; }
 
+    // Uptime counter (sysUpTime, #49 section 6): advances once per second edge;
+    // the glue calls it every tick with monotonic now.
+    void update_uptime(std::uint32_t now_ms);
+    std::uint32_t uptime_s() const { return m_counters.uptime_s; }
+
   private:
     void emit_event(std::uint16_t event_id, std::uint8_t severity, std::uint8_t ctx_kind,
                     std::uint32_t ctx_value, std::uint32_t ctx_value2);
     void bump_counter(codec::QueueClass cls);
-    void update_uptime();
     void assemble_snapshot(std::uint8_t sections_mask, std::uint8_t* out, std::uint16_t& out_len);
     void send_snapshot_fragments(const std::uint8_t* doc, std::uint16_t doc_len,
                                  codec::QueueClass cls);
@@ -182,6 +186,7 @@ class Producer : public KernelEvents, public RuntimeEvents,
     std::uint32_t m_now_ms = 0; // monotonic tick from the glue (set_now)
     bool m_pending_drop = false;       // coalesced drop event latch (defer-on-backpressure)
     std::uint8_t m_pending_drop_cls = 0;
+    std::uint32_t m_last_uptime_s = 0; // last uptime second edge (update_uptime)
 
     // Fault-capture staging (static 512 B, #48 section 8; not subject to class
     // drop policies, #49 section 2.5).
@@ -231,8 +236,14 @@ class Sink : public OutboundControl
     // Returns true when the record was accepted (or handled by class policy);
     // false only for Control/Service answer queues that are full (bounded
     // answers, OutboundControl contract).
-    bool push_class(codec::QueueClass cls, const std::uint8_t* data, std::uint32_t len);    void append_tail_events(const std::uint8_t* data, std::uint32_t len);
+    bool push_class(codec::QueueClass cls, const std::uint8_t* data, std::uint32_t len);
+    void append_tail_events(const std::uint8_t* data, std::uint32_t len);
     void append_tail_logs(const std::uint8_t* data, std::uint32_t len);
+    // Query interception (design §3.2): a Control-family Query frame is not a
+    // wire response - the Sink routes it to Producer::answer_query (snapshot
+    // fragments). Query frames never reach the UART.
+    static bool is_query_frame(const QueueEntry& e);
+    void handle_query_frame(const QueueEntry& e);
 
     UartPort* m_uart = nullptr;
     subscription::Registry* m_subs = nullptr;

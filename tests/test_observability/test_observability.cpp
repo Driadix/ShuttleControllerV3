@@ -496,6 +496,59 @@ TEST(Observability, T9_QueryAnswerFragments)
     EXPECT_LE(total_doc, 456u);
 }
 
+// T9b: Sink intercepts a Query frame routed via OutboundControl (semantic
+// handle_query forwards it) and answers with snapshot fragments instead of
+// echoing the Query to the UART (design §3.2, review F3).
+TEST(Observability, T9b_QueryInterception)
+{
+    ObsEnv env;
+    env.set_now(7);
+
+    // Build a canonical Control Query frame (sections_mask = 0xFF), as
+    // semantic::handle_query forwards it into OutboundControl.
+    v3::codec::Query q;
+    q.sections_mask = 0xFF;
+    std::uint8_t payload[v3::codec::MaxPayload];
+    payload[0] = q.sections_mask;
+    v3::codec::Header h;
+    h.msg_family = static_cast<std::uint8_t>(v3::codec::Family::Control);
+    h.msg_type = static_cast<std::uint8_t>(v3::codec::MsgControl::Query);
+    h.queue_class = static_cast<std::uint8_t>(v3::codec::QueueClass::Control);
+    std::uint8_t frame[v3::codec::Mtu];
+    const std::uint16_t flen = v3::codec::encode(frame, sizeof(frame), h, payload, 1);
+    ASSERT_GT(flen, 0u);
+
+    env.sink.enqueue(v3::codec::QueueClass::Control, frame, flen);
+    env.tick();
+
+    // The wire must carry snapshot fragments (family Observability, msg_type
+    // SnapshotFragment), NOT an echoed Query frame.
+    const std::uint8_t* b = env.uart.bytes();
+    const std::uint32_t n = env.uart.used();
+    bool saw_fragment = false;
+    bool saw_query_echo = false;
+    for (std::uint32_t i = 0; i + 12 <= n; ++i)
+    {
+        if (b[i] == 0xE3 && b[i + 1] == 0x10)
+        {
+            if (b[i + 4] == static_cast<std::uint8_t>(v3::codec::MsgObservability::SnapshotFragment))
+            {
+                saw_fragment = true;
+            }
+            if (b[i + 3] == static_cast<std::uint8_t>(v3::codec::Family::Control) &&
+                b[i + 4] == static_cast<std::uint8_t>(v3::codec::MsgControl::Query))
+            {
+                saw_query_echo = true; // Query must NEVER reach the UART
+            }
+            const std::uint16_t plen = static_cast<std::uint16_t>(b[i + 8]) |
+                                       (static_cast<std::uint16_t>(b[i + 9]) << 8);
+            i += 11 + plen;
+        }
+    }
+    EXPECT_TRUE(saw_fragment);
+    EXPECT_FALSE(saw_query_echo);
+}
+
 // ---------------------------------------------------------------------------
 // T10: push gate - no telemetry without interest
 // ---------------------------------------------------------------------------
@@ -538,9 +591,15 @@ TEST(Observability, T11_FaultCaptureSupersede)
     env.tick();
     EXPECT_GT(env.uart.tx_calls(), 0u); // trace fragments emitted
 
-    // Second capture while pending: supersede + counter.
+    // Second capture AFTER delivery: the previous capture is delivered
+    // (pending cleared synchronously) - NOT a supersede (design §3.3:
+    // supersede counts only while a capture is still being assembled/
+    // delivered). The new capture is emitted normally.
+    const std::uint32_t before = env.producer.counters().trace_capture_superseded;
+    env.set_now(2);
     env.producer.crash_marker_pending(4);
-    EXPECT_GE(env.producer.counters().trace_capture_superseded, 1u);
+    env.tick();
+    EXPECT_EQ(env.producer.counters().trace_capture_superseded, before);
 }
 
 // T11b: auto-clear fault (DegradedTimeout) does NOT latch a capture (#49 8.2).

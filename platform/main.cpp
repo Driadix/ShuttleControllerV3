@@ -117,6 +117,15 @@ void setup()
     g_uart.init();
     g_rtc.init();
 
+    // Observability Producer + Sink (#72): wire sources and the UART sink.
+    // Producer.init BEFORE kernel::init: the kernel emits reset_cause() at
+    // startup (KernelEvents), and the Producer must be initialized to record
+    // the boot cause (design §3.3, #49 §13 crash record through reboot).
+    g_producer.init(&g_epoch, &g_window, &g_health, &g_provisioning, &g_subscriptions,
+                    &g_runtime, &g_sensing, &v3::safety::safety_diag(), &g_rtc, &g_identity,
+                    &g_sink);
+    g_sink.init(&g_uart, &g_subscriptions, &g_producer);
+
     const v3::kernel::KernelConfig cfg{
         &g_time,
         &g_hw,
@@ -126,11 +135,6 @@ void setup()
     };
     v3::kernel::init(cfg);
 
-    // Observability Producer + Sink (#72): wire sources and the UART sink.
-    g_producer.init(&g_epoch, &g_window, &g_health, &g_provisioning, &g_subscriptions,
-                    &g_runtime, &g_sensing, &v3::safety::safety_diag(), &g_rtc, &g_identity,
-                    &g_sink);
-    g_sink.init(&g_uart, &g_subscriptions, &g_producer);
     g_sa.set_events(&g_producer); // safety events -> Producer (Phase 2, #72)
 
     // Sensing slice (#63): I2C adapter init + service start.

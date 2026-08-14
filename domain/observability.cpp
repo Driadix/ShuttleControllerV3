@@ -276,6 +276,13 @@ void Producer::reset_cause(ResetCause cause)
     m_counters.last_boot_cause = static_cast<std::uint32_t>(cause);
     emit_event(kEvResetCause, kSevInfo, static_cast<std::uint8_t>(cause),
                static_cast<std::uint32_t>(cause), 0);
+    // Crash-class boot (design §3.3 / #49 §8.2): a non-power-on reset cause
+    // latches a fault capture (watchdog/software/external/unknown = reboot
+    // class; PowerOn is the normal boot, no capture).
+    if (cause != ResetCause::PowerOn)
+    {
+        start_fault_capture(kEvResetCause, m_now_ms);
+    }
 }
 
 // --- RuntimeEvents ----------------------------------------------------------
@@ -382,10 +389,7 @@ void Producer::health_changed(safety::SafetyHealth from, safety::SafetyHealth to
     // Crash-class fault latch (#49 section 8.2; non-auto-clear only).
     if (to == safety::SafetyHealth::Fault && is_crash_class(fault))
     {
-        // trigger tick: monotonic not owned here; the glue passes it via
-        // start_fault_capture(now) - see glue. We queue a capture with the
-        // health-change trigger (tick resolved by the glue next step).
-        start_fault_capture(kEvHealthChanged, 0);
+        start_fault_capture(kEvHealthChanged, m_now_ms);
     }
 }
 
@@ -415,7 +419,7 @@ void Producer::crash_marker_pending(std::uint32_t crash_count)
         return;
     }
     emit_event(kEvCrashMarkerPending, kSevFatal, 0, crash_count, 0);
-    start_fault_capture(kEvCrashMarkerPending, 0);
+    start_fault_capture(kEvCrashMarkerPending, m_now_ms);
 }
 
 // --- Telemetry --------------------------------------------------------------
@@ -513,6 +517,10 @@ void Producer::start_fault_capture(std::uint16_t trigger_event_id, std::uint32_t
     n = static_cast<std::uint16_t>(n + lg);
 
     m_staging_len = n;
+    // Pending flag guards the staging buffer while fragments are being
+    // delivered; delivery is synchronous (fragments enqueued below), so the
+    // flag clears right after - a supersede only counts while a capture is
+    // still being assembled/delivered (design §3.3).
     m_capture_pending = true;
 
     // Deliver as fragmented traces records (design 3.3): the capture stream =
@@ -521,6 +529,7 @@ void Producer::start_fault_capture(std::uint16_t trigger_event_id, std::uint32_t
     // canonical frame family=Observability msg_type=TraceRecord queue_class=Traces.
     // Per-tick cap 128 B drains at most one fragment per tick (several ticks).
     send_trace_capture(trigger_event_id, trigger_tick, m_staging, m_staging_len);
+    m_capture_pending = false; // delivered (enqueued); staging reusable
 }
 
 // --- Snapshot ---------------------------------------------------------------
@@ -549,96 +558,134 @@ void Producer::assemble_snapshot(std::uint8_t sections_mask, std::uint8_t* out,
     };
 
     ++m_doc_version;
-    put32(m_doc_version);
-    put32(m_epoch != nullptr ? m_epoch->epoch() : 0u);
-    if (m_wall != nullptr)
+    // Sections are selected by sections_mask (design §2.3/§3.2): base (0x01),
+    // gates (0x02), identity (0x04), ops (0x08), sensing (0x10), actuator (0x20),
+    // masks (0x40), counters (0x80). 0xFF = all. Header (version+epoch) always
+    // precedes; sections absent from the mask are skipped (bounded doc).
+    const bool want_base = (sections_mask & 0x01) != 0;
+    const bool want_gates = (sections_mask & 0x02) != 0;
+    const bool want_identity = (sections_mask & 0x04) != 0;
+    const bool want_ops = (sections_mask & 0x08) != 0;
+    const bool want_sensing = (sections_mask & 0x10) != 0;
+    const bool want_actuator = (sections_mask & 0x20) != 0;
+    const bool want_masks = (sections_mask & 0x40) != 0;
+    const bool want_counters = (sections_mask & 0x80) != 0;
+
+    // Base: wall + validity.
+    if (want_base)
     {
-        put32(m_wall->epoch_sec());
-        put8(static_cast<std::uint8_t>(m_wall->time_validity()));
-    }
-    else
-    {
-        put32(0);
-        put8(0);
-    }
-    put8(m_window != nullptr ? static_cast<std::uint8_t>(m_window->window()) : 0u);
-    put8(m_health != nullptr ? static_cast<std::uint8_t>(m_health->health()) : 0u);
-    put8(m_diag != nullptr ? static_cast<std::uint8_t>(m_diag->fault) : 0u);
-    put8(m_diag != nullptr ? static_cast<std::uint8_t>(m_diag->degraded_class) : 0u);
-    put8(m_prov != nullptr ? static_cast<std::uint8_t>(m_prov->status()) : 0u);
-    // Profile stub (#59): supported {800,1000,1200}, qualified/configured/active 0, status 0.
-    for (std::uint8_t i = 0; i < 12; ++i)
-    {
-        put8(0);
-    }
-    // Identity: hardware_id (STM32 UID high 32), fw/build/serial placeholders 0.
-    put32(m_identity != nullptr ? m_identity->hardware_id() : 0u);
-    put32(0);
-    put32(0);
-    put32(0);
-    // Operation summary (runtime snapshot, <= 8).
-    if (m_rt != nullptr)
-    {
-        std::uint32_t count = 0;
-        const runtime::Instance* inst = m_rt->snapshot(count);
-        put8(count > 8 ? 8u : static_cast<std::uint8_t>(count));
-        const std::uint32_t show = count > 8 ? 8u : count;
-        for (std::uint32_t i = 0; i < show; ++i)
+        if (m_wall != nullptr)
         {
-            put32(inst[i].op_id);
-            put8(static_cast<std::uint8_t>(inst[i].type_id & 0xFFu));
-            put8(static_cast<std::uint8_t>(inst[i].state));
-            put8(static_cast<std::uint8_t>(inst[i].activity));
-            put8(0); // reserved
+            put32(m_wall->epoch_sec());
+            put8(static_cast<std::uint8_t>(m_wall->time_validity()));
+        }
+        else
+        {
+            put32(0);
+            put8(0);
         }
     }
-    else
+    // Gates: window/health/fault/degraded/provisioning + profile stub.
+    if (want_gates)
     {
-        put8(0);
+        put8(m_window != nullptr ? static_cast<std::uint8_t>(m_window->window()) : 0u);
+        put8(m_health != nullptr ? static_cast<std::uint8_t>(m_health->health()) : 0u);
+        put8(m_diag != nullptr ? static_cast<std::uint8_t>(m_diag->fault) : 0u);
+        put8(m_diag != nullptr ? static_cast<std::uint8_t>(m_diag->degraded_class) : 0u);
+        put8(m_prov != nullptr ? static_cast<std::uint8_t>(m_prov->status()) : 0u);
+        // Profile stub (#59): supported {800,1000,1200}, qualified/configured/active 0.
+        for (std::uint8_t i = 0; i < 12; ++i)
+        {
+            put8(0);
+        }
+    }
+    // Identity: hardware_id (STM32 UID high 32), fw/build/serial placeholders 0.
+    if (want_identity)
+    {
+        put32(m_identity != nullptr ? m_identity->hardware_id() : 0u);
+        put32(0);
+        put32(0);
+        put32(0);
+    }
+    // Operation summary (runtime snapshot, <= 8).
+    if (want_ops)
+    {
+        if (m_rt != nullptr)
+        {
+            std::uint32_t count = 0;
+            const runtime::Instance* inst = m_rt->snapshot(count);
+            put8(count > 8 ? 8u : static_cast<std::uint8_t>(count));
+            const std::uint32_t show = count > 8 ? 8u : count;
+            for (std::uint32_t i = 0; i < show; ++i)
+            {
+                put32(inst[i].op_id);
+                put8(static_cast<std::uint8_t>(inst[i].type_id & 0xFFu));
+                put8(static_cast<std::uint8_t>((inst[i].type_id >> 8) & 0xFFu)); // u16, design §2.3
+                put8(static_cast<std::uint8_t>(inst[i].state));
+                put8(static_cast<std::uint8_t>(inst[i].activity));
+            }
+        }
+        else
+        {
+            put8(0);
+        }
     }
     // Sensing: 5 sensors {raw u32, age u32, state u8} = 45 B.
-    if (m_sensing != nullptr)
+    if (want_sensing)
     {
-        for (std::uint32_t s = 0; s < 5u; ++s)
+        if (m_sensing != nullptr)
         {
-            sensing::SensorSnapshot snap;
-            if (m_sensing->get_snapshot(static_cast<sensing::SensorId>(s), &snap))
+            for (std::uint32_t s = 0; s < 5u; ++s)
             {
-                put32(snap.raw);
-                put32(snap.age_ms);
-                put8(static_cast<std::uint8_t>(snap.state));
-            }
-            else
-            {
-                put32(0);
-                put32(0);
-                put8(0);
+                sensing::SensorSnapshot snap;
+                if (m_sensing->get_snapshot(static_cast<sensing::SensorId>(s), &snap))
+                {
+                    put32(snap.raw);
+                    put32(snap.age_ms);
+                    put8(static_cast<std::uint8_t>(snap.state));
+                }
+                else
+                {
+                    put32(0);
+                    put32(0);
+                    put8(0);
+                }
             }
         }
     }
     // Actuator commanded (current intent) + battery reserved.
-    if (m_diag != nullptr)
+    if (want_actuator)
     {
-        put32(m_diag->current_intent.seq);
-        put32(static_cast<std::uint32_t>(m_diag->current_intent.kind));
+        if (m_diag != nullptr)
+        {
+            put32(m_diag->current_intent.seq);
+            put32(static_cast<std::uint32_t>(m_diag->current_intent.kind));
+        }
+        else
+        {
+            put32(0);
+            put32(0);
+        }
+        for (std::uint8_t i = 0; i < 8; ++i)
+        {
+            put8(0); // battery reserved
+        }
     }
-    else
+    // Fault/warning masks.
+    if (want_masks)
     {
-        put32(0);
-        put32(0);
+        put8(static_cast<std::uint8_t>(m_diag != nullptr ? fault_mask_from_diag() & 0xFFu : 0u));
+        put8(static_cast<std::uint8_t>(m_diag != nullptr ? (fault_mask_from_diag() >> 8) & 0xFFu : 0u));
+        put8(static_cast<std::uint8_t>(m_diag != nullptr ? warning_mask_from_diag() & 0xFFu : 0u));
+        put8(static_cast<std::uint8_t>(m_diag != nullptr ? (warning_mask_from_diag() >> 8) & 0xFFu : 0u));
     }
-    for (std::uint8_t i = 0; i < 8; ++i)
-    {
-        put8(0); // battery reserved
-    }
-    put8(static_cast<std::uint8_t>(m_diag != nullptr ? fault_mask_from_diag() & 0xFFu : 0u));
-    put8(static_cast<std::uint8_t>(m_diag != nullptr ? (fault_mask_from_diag() >> 8) & 0xFFu : 0u));
-    put8(static_cast<std::uint8_t>(m_diag != nullptr ? warning_mask_from_diag() & 0xFFu : 0u));
-    put8(static_cast<std::uint8_t>(m_diag != nullptr ? (warning_mask_from_diag() >> 8) & 0xFFu : 0u));
     // Counters compact slice (uptime, drops, reset histogram).
-    put32(m_counters.uptime_s);
-    put16_drop(out, n, m_counters.drop_telemetry, m_counters.drop_events);
-    put16_drop(out, n, m_counters.drop_logs, m_counters.drop_traces);
+    if (want_counters)
+    {
+        put32(m_counters.uptime_s);
+        put16_drop(out, n, m_counters.drop_telemetry, m_counters.drop_events);
+        put16_drop(out, n, m_counters.drop_logs, m_counters.drop_traces);
+    }
     out_len = n;
 }
 
@@ -783,10 +830,15 @@ void Producer::push_birth(std::uint16_t authority_id)
     }
 }
 
-void Producer::update_uptime()
+void Producer::update_uptime(std::uint32_t now_ms)
 {
-    // Called by the glue every second; uptime_s from boot.
-    ++m_counters.uptime_s;
+    // sysUpTime (#49 section 6): advance once per second edge, never per tick.
+    const std::uint32_t s = now_ms / 1000u;
+    if (s > m_last_uptime_s)
+    {
+        m_counters.uptime_s = s;
+        m_last_uptime_s = s;
+    }
 }
 
 std::uint8_t Producer::next_seq(codec::QueueClass cls)
@@ -901,6 +953,40 @@ void Producer::put16_drop(std::uint8_t* out, std::uint16_t& n, std::uint16_t a, 
 }
 
 // --- Sink -------------------------------------------------------------------
+
+bool Sink::is_query_frame(const QueueEntry& e)
+{
+    // Canonical frame: sync 0xE3 0x10 + header; Control family, Query msg_type
+    // (semantic::handle_query forwards Query into the outbound Control path).
+    if (e.len < 12u)
+    {
+        return false;
+    }
+    if (e.data[0] != codec::Sync0 || e.data[1] != codec::Sync1)
+    {
+        return false;
+    }
+    return e.data[3] == static_cast<std::uint8_t>(codec::Family::Control) &&
+           e.data[4] == static_cast<std::uint8_t>(codec::MsgControl::Query);
+}
+
+void Sink::handle_query_frame(const QueueEntry& e)
+{
+    if (m_producer == nullptr)
+    {
+        return;
+    }
+    // Decode the Query sections_mask (payload starts after sync 2 + header 8).
+    codec::Query q;
+    const std::uint16_t payload_len = e.len >= 12u
+                                          ? static_cast<std::uint16_t>(e.len - 12u)
+                                          : 0u;
+    if (codec::decode_query(e.data + 10, payload_len, q) != codec::CodecResult::Ok)
+    {
+        return;
+    }
+    m_producer->answer_query(q.sections_mask); // fragments enqueue to Control (prio 1)
+}
 
 void Sink::init(UartPort* uart, subscription::Registry* subs, Producer* producer)
 {
@@ -1024,6 +1110,16 @@ void Sink::tick()
             {
                 break;
             }
+            // Query interception (design §3.2): a Control-family Query frame is
+            // NOT a wire response - the Sink routes it to the Producer, which
+            // assembles the snapshot document and answers with fragments
+            // (priority 1). The Query frame itself never reaches the UART.
+            if (cls == codec::QueueClass::Control && is_query_frame(e))
+            {
+                (void)q.pop(e);
+                handle_query_frame(e); // -> Producer::answer_query (bounded)
+                continue;              // fragments land in the Control queue
+            }
             const std::uint32_t need = static_cast<std::uint32_t>(e.len);
             if (spent + need > cap)
             {
@@ -1062,24 +1158,32 @@ void Sink::tick()
 
 void Sink::append_tail_events(const std::uint8_t* data, std::uint32_t len)
 {
-    // Compact mirror (design 2.2): full record 14 + 12 = 26 B.
-    const std::uint32_t copy = len < 26u ? len : 26u;
+    // Compact mirror (design 2.2): the RECORD = envelope (14) + EventBody (12)
+    // = 26 B. `data` points at the canonical frame start (sync + header 8);
+    // the record payload begins at data+10. Copy the payload, not the frame
+    // prefix (review F4): the tail must be reassemblable into trace records.
+    const std::uint32_t payload_start = len >= 10u ? 10u : len;
+    const std::uint32_t payload_len = len - payload_start;
+    const std::uint32_t copy = payload_len < 26u ? payload_len : 26u;
     const std::uint32_t idx = (m_tail_events_count % TailDepth) * 26u;
     for (std::uint32_t i = 0; i < copy; ++i)
     {
-        m_tail_events[idx + i] = data[i];
+        m_tail_events[idx + i] = data[payload_start + i];
     }
     ++m_tail_events_count;
 }
 
 void Sink::append_tail_logs(const std::uint8_t* data, std::uint32_t len)
 {
-    // Compact mirror (design 2.2): envelope 14 + level/module 2 + text <= 16.
-    const std::uint32_t copy = len < 32u ? len : 32u;
+    // Compact mirror (design 2.2): envelope 14 + level/module 2 + text <= 16 =
+    // <= 32 B. Payload begins at data+10 (after sync + header).
+    const std::uint32_t payload_start = len >= 10u ? 10u : len;
+    const std::uint32_t payload_len = len - payload_start;
+    const std::uint32_t copy = payload_len < 32u ? payload_len : 32u;
     const std::uint32_t idx = (m_tail_logs_count % TailDepth) * 32u;
     for (std::uint32_t i = 0; i < copy; ++i)
     {
-        m_tail_logs[idx + i] = data[i];
+        m_tail_logs[idx + i] = data[payload_start + i];
     }
     ++m_tail_logs_count;
 }
