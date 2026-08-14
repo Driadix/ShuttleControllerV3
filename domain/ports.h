@@ -5,6 +5,8 @@
 
 #include <cstdint>
 
+#include "domain/codec.h"
+#include "domain/safety_state.h"
 #include "domain/static_queue.h"
 
 namespace slice
@@ -185,6 +187,78 @@ struct SafetyStateMarker
     virtual void write_crash(std::uint32_t crash_count) = 0; // latch crash-класса (Фаза 2+)
     virtual State read_crash() = 0;                          // стартап, read-only
     virtual void clear_crash() = 0;                          // только явный ack (Фаза 2+)
+};
+
+// ---------------------------------------------------------------------------
+// Admission gates + runtime events + outbound control (design
+// docs/operation-runtime-design-v3.md sections 2.9, 4.2; ticket #74).
+// Read-only snapshots (single-writer, #46 I-LC-1): the gates are consumed by
+// the Semantic Contract; writers stay at their owners.
+// ---------------------------------------------------------------------------
+
+// Controller Epoch (fencing boundary, #13): issued by the execution core on
+// Boot exit (#46 section 9). Implemented by platform (kernel/glue).
+struct EpochSource
+{
+    virtual std::uint32_t epoch() const = 0; // foreground-only
+};
+
+// Platform window axis (#46 section 2; owner: execution core).
+enum class PlatformWindow : std::uint8_t
+{
+    Boot = 0,
+    Serving = 1,
+    Update = 2,
+    Recovery = 3,
+};
+
+struct WindowSource
+{
+    virtual PlatformWindow window() const = 0;
+};
+
+// Health axis (#45 section 2; owner: Safety Authority #71, read-only here).
+struct HealthSource
+{
+    virtual safety::SafetyHealth health() const = 0;
+};
+
+// Provisioning axis (#46 section 3; owner: Config & Profile, #76; stub until then).
+enum class ProvisioningStatus : std::uint8_t
+{
+    Unprovisioned = 0,
+    Provisioning = 1,
+    Provisioned = 2,
+};
+
+struct ProvisioningSource
+{
+    virtual ProvisioningStatus status() const = 0;
+};
+
+// Runtime event sink (design section 4.2). Emission happens at the domain
+// modules; counters live at the Observability Producer (#43 section 4).
+// Implemented by the Producer (#72) / glue stub (Phase 2 start). Foreground
+// only, never blocking (#43 section 6).
+struct RuntimeEvents
+{
+    virtual void admission_rejected(std::uint8_t reject_code) = 0; // 0x04xx + counter
+    virtual void request_duplicate(std::uint32_t request_id, bool conflict) = 0;
+    virtual void transport_error(codec::TransportError e) = 0;     // 0x05xx (parse/drop)
+    virtual void queue_rejected(codec::QueueClass cls) = 0;       // inbound overload 0x05xx
+    virtual void operation_started(std::uint32_t op_id, std::uint16_t type_id) = 0; // 0x06xx
+    virtual void operation_terminal(std::uint32_t op_id, std::uint16_t type_id,
+                                    std::uint16_t outcome_code) = 0;                // 0x06xx
+    virtual void subscription_changed(std::uint16_t authority_id, bool active) = 0;
+    virtual void subscription_drop(std::uint8_t sub_id) = 0;      // slow consumer, 0x05xx
+};
+
+// Outbound control plane: ACK/query/subscription responses as CANONICAL frames
+// (codec-encoded). Implemented by the Observability Sink (#72) / glue stub.
+// Never blocks; bounded (R1/R4).
+struct OutboundControl
+{
+    virtual bool enqueue(codec::QueueClass cls, const std::uint8_t* data, std::uint32_t len) = 0;
 };
 
 // ---------------------------------------------------------------------------

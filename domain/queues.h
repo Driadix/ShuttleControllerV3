@@ -1,82 +1,168 @@
-// Static queue classes (issue #43 section 6, budgets #48 section 6).
-// Incoming: Control 18 (16 + 2 reserve), Service 8, Update 4.
-// Outgoing: telemetry 8 (drop-oldest), events 32 / logs 32 (drop-newest),
-// traces 16 (drop-oldest).
+// Production inbound queue classes (design docs/operation-runtime-design-v3.md
+// section 2.8; #43 section 6, #48 section 6). Frame-based (MTU 128 B).
+// Overload: Control/Service - reject on admission; Update - reject of new
+// transactions (in-progress reserve is update-flow policy, #76). Reserve
+// semantics: stop/handshake frames (codec::FlagReserve) land in dedicated
+// reserve slots and are NEVER rejected by a full working queue (#43 section 6,
+// #45 section 4: stop intents never rejected).
+//
+// Outbound classes (telemetry/events/logs/traces) are NOT here - they belong
+// to the Observability Sink (#72).
 #pragma once
 
 #include <cstdint>
 
 #include "domain/static_queue.h"
 
-namespace slice
+namespace v3
+{
+namespace queue
 {
 
-using ControlFrame = std::uint16_t; // synthetic frame payload for the slice
-using Byte = std::uint8_t;
-
-class QueueClasses
+struct Frame
 {
-  public:
-    static constexpr std::uint32_t ControlCapacity = 18; // 16 + 2 reserve (stop/handshake never rejected)
-    static constexpr std::uint32_t ServiceCapacity = 8;
-    static constexpr std::uint32_t UpdateCapacity = 4; // reserve 2 while in-progress
-
-    static constexpr std::uint32_t TelemetryCapacity = 8;
-    static constexpr std::uint32_t EventsCapacity = 32;
-    static constexpr std::uint32_t LogsCapacity = 32;
-    static constexpr std::uint32_t TracesCapacity = 16;
-
-    // Ingress. Admission policy (reject on admission, reserve for stop/handshake):
-    // Control keeps 2 slots free for safety/control reserve (issue #43 section 6).
-    bool control_push(const ControlFrame& frame) { return m_control.push(frame); }
-    bool service_push(const ControlFrame& frame) { return m_service.push(frame); }
-    bool update_push(const ControlFrame& frame) { return m_update.push(frame); }
-
-    bool control_pop(ControlFrame& out) { return m_control.pop(out); }
-    bool service_pop(ControlFrame& out) { return m_service.pop(out); }
-    bool update_pop(ControlFrame& out) { return m_update.pop(out); }
-
-    // Egress. Overload: telemetry/traces drop-oldest (freshness), events/logs
-    // drop-newest (never destroy early fault evidence).
-    void telemetry_push(Byte b) { push_drop_oldest(m_telemetry, b); }
-    void events_push(Byte b) { push_drop_newest(m_events, b); }
-    void logs_push(Byte b) { push_drop_newest(m_logs, b); }
-    void traces_push(Byte b) { push_drop_oldest(m_traces, b); }
-
-    // Observable counters (obligation #7: overflows observable).
-    std::uint32_t dropped_telemetry() const { return m_telemetry.overflow_count(); }
-    std::uint32_t dropped_events() const { return m_events.overflow_count(); }
-    std::uint32_t dropped_logs() const { return m_logs.overflow_count(); }
-    std::uint32_t dropped_traces() const { return m_traces.overflow_count(); }
-    std::uint32_t rejected_control() const { return m_control.overflow_count(); }
-
-    std::uint32_t control_size() const { return static_cast<std::uint32_t>(m_control.size()); }
-    std::uint32_t telemetry_size() const { return static_cast<std::uint32_t>(m_telemetry.size()); }
-
-  private:
-    template <std::size_t N>
-    static void push_drop_oldest(StaticQueue<Byte, N>& q, Byte b)
-    {
-        if (!q.push(b) && !q.empty())
-        {
-            Byte discard = 0;
-            (void)q.pop(discard); // drop oldest, keep freshest
-            (void)q.push(b);
-        }
-    }
-
-    static void push_drop_newest(StaticQueue<Byte, 32>& q, Byte b)
-    {
-        (void)q.push(b); // full => drop-newest (push fails, overflow counted)
-    }
-
-    StaticQueue<ControlFrame, ControlCapacity> m_control;
-    StaticQueue<ControlFrame, ServiceCapacity> m_service;
-    StaticQueue<ControlFrame, UpdateCapacity> m_update;
-    StaticQueue<Byte, TelemetryCapacity> m_telemetry;
-    StaticQueue<Byte, EventsCapacity> m_events;
-    StaticQueue<Byte, LogsCapacity> m_logs;
-    StaticQueue<Byte, TracesCapacity> m_traces;
+    std::uint8_t data[128] = {};
+    std::uint16_t len = 0;
 };
 
-} // namespace slice
+enum class Class : std::uint8_t
+{
+    Control = 0,
+    Service = 1,
+    Update = 2,
+};
+
+class InboundQueue
+{
+  public:
+    static constexpr std::uint32_t ControlCapacity = 16; // рабочие слота
+    static constexpr std::uint32_t ControlReserve = 2;   // резерв stop/handshake (#48 §6: 16+2)
+    static constexpr std::uint32_t ServiceCapacity = 8;
+    static constexpr std::uint32_t UpdateCapacity = 2;   // рабочие (новые транзакции)
+    static constexpr std::uint32_t UpdateReserve = 2;    // резерв in-progress (#48 §6: 2+2)
+
+    // reserve=true (stop/handshake; update in-progress frames): dedicated
+    // reserve slot, never rejected by a full working queue. reserve=false +
+    // full: rejected (observable counter, obs #7). Never blocks (#43 §6).
+    bool push(Class cls, const Frame& f, bool reserve)
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            if (m_control.push(f))
+            {
+                return true;
+            }
+            if (reserve && m_control_reserve.push(f))
+            {
+                return true;
+            }
+            if (!reserve)
+            {
+                ++m_rejected_control;
+            }
+            return false;
+        case Class::Service:
+            if (m_service.push(f))
+            {
+                return true;
+            }
+            ++m_rejected_service;
+            return false;
+        case Class::Update:
+            if (m_update.push(f))
+            {
+                return true;
+            }
+            if (reserve && m_update_reserve.push(f))
+            {
+                return true; // in-progress transaction frames keep capacity (#48 §6)
+            }
+            if (!reserve)
+            {
+                ++m_rejected_update;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    // Popping prefers reserve slots first (stop/handshake/in-progress drain
+    // with priority).
+    bool pop(Class cls, Frame& out)
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            if (m_control_reserve.pop(out))
+            {
+                return true;
+            }
+            return m_control.pop(out);
+        case Class::Service:
+            return m_service.pop(out);
+        case Class::Update:
+            if (m_update_reserve.pop(out))
+            {
+                return true;
+            }
+            return m_update.pop(out);
+        }
+        return false;
+    }
+
+    bool is_full(Class cls) const
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            return m_control.full() && m_control_reserve.full();
+        case Class::Service:
+            return m_service.full();
+        case Class::Update:
+            return m_update.full() && m_update_reserve.full();
+        }
+        return false;
+    }
+
+    std::uint32_t size(Class cls) const
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            return static_cast<std::uint32_t>(m_control.size() + m_control_reserve.size());
+        case Class::Service:
+            return static_cast<std::uint32_t>(m_service.size());
+        case Class::Update:
+            return static_cast<std::uint32_t>(m_update.size() + m_update_reserve.size());
+        }
+        return 0;
+    }
+
+    std::uint32_t rejected(Class cls) const
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            return m_rejected_control;
+        case Class::Service:
+            return m_rejected_service;
+        case Class::Update:
+            return m_rejected_update;
+        }
+        return 0;
+    }
+
+  private:
+    slice::StaticQueue<Frame, ControlCapacity> m_control;
+    slice::StaticQueue<Frame, ControlReserve> m_control_reserve;
+    slice::StaticQueue<Frame, ServiceCapacity> m_service;
+    slice::StaticQueue<Frame, UpdateCapacity> m_update;
+    slice::StaticQueue<Frame, UpdateReserve> m_update_reserve;
+    std::uint32_t m_rejected_control = 0;
+    std::uint32_t m_rejected_service = 0;
+    std::uint32_t m_rejected_update = 0;
+};
+
+} // namespace queue
+} // namespace v3
