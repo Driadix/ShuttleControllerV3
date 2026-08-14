@@ -168,9 +168,14 @@ std::uint32_t CanBus::rx_drain(CanFrame* out, std::uint32_t budget)
 
 void CanBus::force_stop_tx()
 {
-    // Force-stop preempts pending normal TX: ABRQ all mailboxes, then send the
-    // min-ID frame (wins bus arbitration against 100/101/2405).
+    // Force-stop preempts pending normal TX: ABRQ all mailboxes, then BOUNDED-wait
+    // for the TME (transmit mailbox empty) bits - ABRQ is async; AddTxMessage before
+    // the mailboxes free would return HAL_ERROR and the safety frame would vanish.
     CAN1->TSR = CAN_TSR_ABRQ0 | CAN_TSR_ABRQ1 | CAN_TSR_ABRQ2;
+    for (std::uint32_t i = 0; i < 1000u &&
+         (CAN1->TSR & (CAN_TSR_TME0 | CAN_TSR_TME1 | CAN_TSR_TME2)) == 0u; ++i)
+    {
+    }
 
     CAN_TxHeaderTypeDef hdr{};
     hdr.ExtId = v3::safety::kForceStopFrame.id;
@@ -183,12 +188,19 @@ void CanBus::force_stop_tx()
         data[i] = v3::safety::kForceStopFrame.data[i];
     }
     std::uint32_t mailbox = 0;
-    (void)HAL_CAN_AddTxMessage(&g_hcan, &hdr, data, &mailbox); // best-effort on a failing bus
-
-    if (m_diag != nullptr)
+    // Best-effort on a failing bus: failure is observable (can_tx_dropped); the real
+    // safety net is the per-device commissioning fail-safe of the drives (Q7.1 A).
+    if (HAL_CAN_AddTxMessage(&g_hcan, &hdr, data, &mailbox) == HAL_OK)
     {
-        ++m_diag->can_tx_count;
-        m_diag->record_frame(2u, v3::safety::kForceStopFrame, monotonic::now_ms());
+        if (m_diag != nullptr)
+        {
+            ++m_diag->can_tx_count;
+            m_diag->record_frame(2u, v3::safety::kForceStopFrame, monotonic::now_ms());
+        }
+    }
+    else if (m_diag != nullptr)
+    {
+        ++m_diag->can_tx_dropped;
     }
 }
 
@@ -208,17 +220,20 @@ CanErrorState CanBus::error_state() const
 
 void CanBus::recover_bus_off()
 {
-    // Manual bus-off recovery (AutoBusOff = DISABLE): request init, then re-enter
-    // normal mode (RM0090 §32.7). Bounded; fault stays until explicit reset (HZ-03).
-    if ((CAN1->MSR & CAN_MSR_SLAK) == 0u)
+    // Manual bus-off recovery (AutoBusOff = DISABLE): request init mode and wait for
+    // the INIT acknowledgment (CAN_MSR_INAK, NOT SLAK - sleep ack), then leave init
+    // mode (software re-integration request); re-integration completes after 128
+    // occurrences of 11 recessive bits (RM0090 §32.7). Bounded. Fault stays until
+    // explicit reset (HZ-03, #45).
+    if ((CAN1->MSR & CAN_MSR_INAK) == 0u)
     {
-        CAN1->MCR |= CAN_MCR_INRQ; // request initialization mode
-        for (std::uint32_t i = 0; i < 1000u && (CAN1->MSR & CAN_MSR_SLAK) == 0u; ++i)
+        CAN1->MCR |= CAN_MCR_INRQ;
+        for (std::uint32_t i = 0; i < 1000u && (CAN1->MSR & CAN_MSR_INAK) == 0u; ++i)
         {
         }
     }
-    CAN1->MCR &= ~static_cast<std::uint32_t>(CAN_MCR_INRQ); // leave init (re-integration)
-    for (std::uint32_t i = 0; i < 1000u && (CAN1->MSR & CAN_MSR_SLAK) != 0u; ++i)
+    CAN1->MCR &= ~static_cast<std::uint32_t>(CAN_MCR_INRQ);
+    for (std::uint32_t i = 0; i < 1000u && (CAN1->MSR & CAN_MSR_INAK) != 0u; ++i)
     {
     }
     if (m_diag != nullptr)
