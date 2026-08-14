@@ -232,8 +232,8 @@ KernelEvents / RuntimeEvents / safety::Events (foreground, владельцы м
   → Observability glue: sink tick (каждый тик, self-repeating)
   → Sink::tick(): drain по приоритетам (1 Control/Service, 2 events, 3 logs, 4 traces, 5 telemetry),
     per-class caps 128 Б/тик + суммарно <= 230 Б/тик (bridge), запись в UartPort;
-    TX-кольцо полное → Producer::note_tx_drop (счётчик + событие, НЕ блокировать)
-  → adapters/uart_bridge: кольцо 256 Б (если полное — drop, см. выше)
+    TX-кольцо полное → DEFER (кадр остаётся, следующий тик; НЕ блокировать)
+  → adapters/uart_bridge: кольцо 256 Б (полное — Sink DEFER-ит кадр до следующего тика, §3.4)
   → TXE ISR: байт из кольца в TDR (и только это)
 ```
 
@@ -289,14 +289,29 @@ sink_tick (self-repeating, каждый тик):
   для приоритетов 1..5 (Control/Service → events → logs → traces → telemetry):
     пока budget > 0 и очередь класса не пуста:
       кадр = peek(класс)                    # не удаляем до решения
-      если spent[класс] + len(кадр) > cap[класс]:   # per-class cap 128 Б (bridge):
-          pop(класс); producer->note_class_drop(класс)  # кадр сверх cap — drop
-          continue                              # (политика класса + счётчик), не ждёт тика
+      если spent[класс] + len(кадр) > cap[класс]:   # per-class cap 128 Б (bridge)
+          break                               # DEFER: голова остаётся в очереди,
+                                              #   дренится следующим тиком (никаких
+                                              #   drop на drain — политика класса
+                                              #   применяется только на enqueue)
+      если len(кадр) > budget:                # DEFER: линк-бюджет тика исчерпан
+          break                               #   (суммарно <= 230 Б/тик, #48 §7)
       если uart->tx_bytes_available() < len(кадр):
-          pop(класс); producer->note_tx_drop(класс)  # TX-кольцо полное: никогда не ждём (#43 §6)
-          break                              # на следующий тик
+          break                               # DEFER: TX-кольцо полное — никогда
+                                              #   не ждём, кадр ждёт тик (#43 §6)
       pop(класс); uart->tx(кадр); budget -= len(кадр); spent[класс] += len(кадр)
+  producer->flush_pending_drop()              # coalesced drop-событие (0x05xx),
+                                              #   только когда Events-очередь имеет ёмкость
 ```
+
+Drop-семантика (важно): **на drain никаких drop не происходит** — не поместившийся в
+cap/budget/кольцо кадр остаётся в очереди (defer-on-backpressure, #49 §10). Drop
+применяется ТОЛЬКО на enqueue (переполнение очереди класса: drop-oldest /
+drop-newest, #43 §6) и считается Producer-ом (single-writer). Событие о drop
+(0x05xx) эмитится COALESCEД-латчом: Producer::note_class_drop инкрементирует
+счётчик немедленно и ставит pending-флаг; flush_pending_drop() (конец sink_tick)
+эмитит ОДНО событие, только если Events-очередь не полна — рекурсия событий при
+переполнении невозможна.
 
 Внешние глубины Sink-очередей (bounded, R4; #48 §6 задаёт только egress 8/32/32/16 и
 inbound): Control/Service-очереди Sink (приоритет 1) — **Control 16 / Service 8** —
@@ -352,7 +367,7 @@ struct IdentitySource {
 | Каждый domain/adapter шаг ≤ T_step (10 ms) | #48 §4 | sink/telemetry-шаги bounded; overrun наблюдаем через KernelEvents (#70) |
 | Очереди классов 8/32/32/16, bounded | #48 §6 | capacity + drop-счётчики + события (T2-T4) |
 | Каждый drop/reject → счётчик + событие | #43 §6 | Producer counters + 0x05xx (T2-T4, T7) |
-| TX никогда не блокирует (кольцо полное → drop) | #43 §6, #54 #12 | T15 host + L4 (log-storm) |
+| TX никогда не блокирует (кольцо полное → DEFER, кадр ждёт тик) | #43 §6, #54 #12 | T15 host + L4 (log-storm) |
 | ISR (TXE) пишет только TDR из кольца; policy — foreground | #43 §3.2, R2 | T15 (ISR-путь не вызывает Sink/Producer) |
 | Envelope порядок `(epoch, tick)` wrap-safe; seq rolling mod 256 | #49 §2.1 | T5, T6 property |
 | telemetry gap — норма, re-sync только по events/logs/traces и только клиентом | #49 §2.2/§9 | T9, T10 |
@@ -422,10 +437,13 @@ class Producer {
     void can_failsafe(CanErrorState state) override;
     void crash_marker_pending(std::uint32_t crash_count) override;
 
-    // Drop-канал Sink→Producer (single-writer, #43 §4): Sink репортит, счётчик и
-    // событие 0x05xx ведёт Producer. note_tx_drop — TX-кольцо полное (никогда не ждём).
-    void note_class_drop(codec::QueueClass cls);   // переполнение очереди класса
-    void note_tx_drop(codec::QueueClass cls);      // TX-кольцо не вместило кадр
+    // Drop channel Sink->Producer (single-writer, #43 §4): Sink репортит,
+    // счётчик и событие 0x05xx ведёт Producer. note_class_drop инкрементирует
+    // счётчик немедленно и ставит COALESCEД-латч; flush_pending_drop (конец
+    // sink_tick) эмитит одно событие, когда Events-очередь имеет ёмкость
+    // (defer-on-backpressure, #49 §10 - рекурсии при переполнении нет).
+    void note_class_drop(codec::QueueClass cls);
+    void flush_pending_drop();
     void note_high_water(codec::QueueClass cls, std::uint32_t size);
 
     // Telemetry: собирает body из источников (health/diag/sensing/runtime),
@@ -446,6 +464,7 @@ class Sink {
     void init(UartPort* uart, subscription::Registry* subs, Producer* producer);
     bool enqueue(codec::QueueClass cls, const std::uint8_t* data, std::uint32_t len); // OutboundControl
     void tick();  // drain по приоритетам, никогда не блокирует
+    bool events_full() const;  // ёмкость Events-очереди (гейт coalesced drop-события)
 };
 
 // Логирование: bounded text (<= 80 Б), runtime-порог, без секретов (A6).
@@ -500,20 +519,33 @@ enqueue(cls, frame):
             producer.note_class_drop(Traces); return true
   return false
 
-# Sink::tick — никогда не блокирует (#43 §6, #54 #12); per-class caps + суммарный budget
+# Producer::note_class_drop — счётчик сразу, событие COALESCEД-латчом
+note_class_drop(cls):
+  bump_counter(cls)                        # счётчик никогда не теряется
+  pending_drop = true; pending_drop_cls = cls   # событие позже, если ёмкость есть
+
+# Producer::flush_pending_drop — вызывается в конце sink_tick
+flush_pending_drop():
+  if pending_drop and not sink.events_full():
+    pending_drop = false
+    emit_event(0x0502, pending_drop_cls)   # одно coalesced событие (без рекурсии)
+
+# Sink::tick — никогда не блокирует (#43 §6, #54 #12); DEFER на cap/budget/кольцо
 tick():
   budget = link_budget()                               # bridge 230 Б/тик (RX неактивен в #72)
   spent[cls] = 0                                       # per-class per-tick cap (#49 §10)
   for prio in [Control/Service, Events, Logs, Traces, Telemetry]:
     while budget > 0 and not empty(prio):
       frame = peek(prio)
-      if spent[prio] + len(frame) > cap[prio]:         # 128 Б/класс/тик (bridge):
-        pop(prio); producer.note_class_drop(prio)      #   кадр сверх cap — drop (политика
-        continue                                       #   класса + счётчик), не ждёт тика
-      if len(frame) > uart.tx_bytes_available():       # кольцо не вместит — drop, не ждём
-        pop(prio); producer.note_tx_drop(prio); break
+      if spent[prio] + len(frame) > cap[prio]:         # 128 Б/класс/тик: DEFER
+        break                                          # голова остаётся (нет drop на drain)
+      if len(frame) > budget:                          # DEFER: бюджет тика исчерпан
+        break                                          # (суммарно <= 230 Б/тик, #48 §7)
+      if len(frame) > uart.tx_bytes_available():       # кольцо не вместит: DEFER
+        break                                          # никогда не ждём (#43 §6)
       pop(prio); uart.tx(frame.data, frame.len)
       budget -= len(frame); spent[prio] += len(frame)
+  producer.flush_pending_drop()                        # coalesced drop-событие
 
 # adapters/uart_bridge — кольцо + TXE ISR (R2)
 tx(data, len):
@@ -577,7 +609,7 @@ flowchart TD
 | T4 | test_observability | logs drop-newest + обрезка text > 80 Б (без chunk-сплита) | emit длинный log, assert ≤ 80 Б и целостность | host |
 | T5 | test_observability | seq gap-детекция: mod 256, разность > 128 неоднозначна (supersedes); порядок (epoch, tick) wrap-safe через 2^32 | property + граничные инъекции | host |
 | T6 | test_observability | monotonic wrap: tick 0xFFFFFFF0 → 0x10: «позже» по модулю, порядок не ломается; NTP-скачок не влияет | fake time, assert order | host |
-| T7 | test_observability | per-tick caps: bridge 128 Б/класс, суммарно ≤ 230 Б/тик; переполнение класса → политика + счётчик | большой backlog, один tick, assert drain ≤ caps | host |
+| T7 | test_observability | per-tick caps: bridge 128 Б/класс, суммарно ≤ 230 Б/тик; кадр сверх cap/бюджета DEFER-ится (остаётся в очереди), drop не происходит на drain | большой backlog, один tick, assert drain ≤ caps + очередь сохраняет head | host |
 | T8 | test_observability | Приоритеты: Control/Service > events > logs > traces > telemetry при backlog всех классов | fill все, drain, assert порядок кадров | host |
 | T9 | test_observability | Query-ответ: документ ≤ 456 Б, ≤ 4 фрагмента, fragmentIndex/Count корректны, version+epoch fencing (старая версия отбрасывается) | fake runtime/sensing/diag, answer_query, decode | host |
 | T10 | test_observability | Birth: на (re)subscribe полный документ, гейтится maxBytesPerTick; telemetry-gap НЕ триггерит re-sync; re-sync только по events/logs/traces и только клиентом (Query) | registry-фейк, birth_pending, assert push | host |
@@ -585,7 +617,7 @@ flowchart TD
 | T12 | test_observability | Счётчики: uptime_s, reset-by-category (reset_cause), last_boot_cause, admission-гистограмма, subscription_drops | inject KernelEvents/RuntimeEvents, assert counters | host |
 | T13 | test_observability | Push-гейт: без interest(Telemetry) telemetry не эмитится; events всегда при bridge default; после unsubscribe — тишина | registry-фейк, assert Sink пуст | host |
 | T14 | test_observability | wall: Unsynced → wall=0, timeValidity=Unsynced; RtcOnly после RTC-init без SetWallClock; Synced недостижим в #72 | fake wall, assert envelope | host |
-| T15 | test_observability | TX никогда не блокирует: полное TX-кольцо → drop + счётчик + событие, Sink::tick возвращает, кадр не утерян молча; ISR-путь (uart_bridge TU) не вызывает Sink/Producer | RecordingUart full, nm/include-lint | host |
+| T15 | test_observability | TX никогда не блокирует: полное TX-кольцо → DEFER (голова остаётся в очереди, tick возвращается, без drop/счётчика); после освобождения кольца кадр уходит; ISR-путь (uart_bridge TU) не вызывает Sink/Producer | RecordingUart full → free, nm/include-lint | host |
 | T16 | test_observability_codec | Кодеки: envelope/body/snapshot-fragment round-trip, bounds-check, LE, CRC-валидность canonical frame | fuzz + граничные длины | host |
 | T17 | test_observability | Свойства (RapidCheck): для любых последовательностей emit ≤ budget — очереди bounded, счётчики монотонны, seq rolling без дубликатов, drop-политики согласованы с классом | property | host |
 | T18 | target | UART TX на L4: telemetry heartbeat 300 мс (bridge default), canonical frames 0xE3 0x10 + CRC-valid, machine-readable capture (runner) | L4 сценарий `observability-uart` (runner #65, normalize расширен на V3-кадр) | L4 |

@@ -342,5 +342,183 @@ std::uint32_t request_fingerprint(const OperationRequest& r)
     return crc ^ 0xFFFFFFFFu;
 }
 
+// --- Observability codecs (design docs/observability-design-v3.md section 2;
+//     ticket #72). Explicit LE field access - wire memory is never cast to
+//     structs (alignment/aliasing/endianness safe, R3/R7). ---------------
+
+std::uint16_t encode_envelope(std::uint8_t* buf, std::uint16_t cap, const Envelope& e, bool with_wall)
+{
+    const std::uint16_t size = with_wall ? Envelope::SizeWithWall : Envelope::SizeNoWall;
+    if (cap < size)
+    {
+        return 0;
+    }
+    // LSB-first: bits[2:0] class_id, bits[4:3] time_validity, bits[7:5] reserved.
+    const std::uint8_t cls = static_cast<std::uint8_t>(e.class_id & 0x07u);
+    const std::uint8_t tv = static_cast<std::uint8_t>(e.time_validity) & 0x03u;
+    buf[0] = static_cast<std::uint8_t>(cls | (tv << 3));
+    wr32(buf + 1, e.controller_epoch);
+    wr32(buf + 5, e.monotonic_tick);
+    buf[9] = e.seq;
+    if (with_wall)
+    {
+        wr32(buf + 10, e.wall_time);
+    }
+    return size;
+}
+
+CodecResult decode_envelope(const std::uint8_t* p, std::uint16_t len, Envelope& out, bool with_wall)
+{
+    const std::uint16_t size = with_wall ? Envelope::SizeWithWall : Envelope::SizeNoWall;
+    if (len < size)
+    {
+        return CodecResult::Truncated;
+    }
+    out.class_id = static_cast<std::uint8_t>(p[0] & 0x07u);
+    out.time_validity = static_cast<TimeValidity>((p[0] >> 3) & 0x03u);
+    out.controller_epoch = rd32(p + 1);
+    out.monotonic_tick = rd32(p + 5);
+    out.seq = p[9];
+    out.wall_time = with_wall ? rd32(p + 10) : 0u;
+    return len == size ? CodecResult::Ok : CodecResult::OutOfBounds;
+}
+
+std::uint16_t encode_telemetry_body(std::uint8_t* buf, std::uint16_t cap, const TelemetryBody& b)
+{
+    constexpr std::uint16_t kSize = 18;
+    if (cap < kSize)
+    {
+        return 0;
+    }
+    buf[0] = b.op_state;
+    wr32(buf + 1, b.position_mm);
+    wr16(buf + 5, b.speed_mm_s);
+    buf[7] = b.health;
+    wr16(buf + 8, b.fault_mask);
+    wr16(buf + 10, b.warning_mask);
+    buf[12] = b.battery_charge;
+    wr16(buf + 13, b.battery_voltage_mv);
+    wr16(buf + 15, b.pallet_count);
+    buf[17] = b.state_flags;
+    return kSize;
+}
+
+CodecResult decode_telemetry_body(const std::uint8_t* p, std::uint16_t len, TelemetryBody& out)
+{
+    constexpr std::uint16_t kSize = 18;
+    if (len < kSize)
+    {
+        return CodecResult::Truncated;
+    }
+    out.op_state = p[0];
+    out.position_mm = rd32(p + 1);
+    out.speed_mm_s = rd16(p + 5);
+    out.health = p[7];
+    out.fault_mask = rd16(p + 8);
+    out.warning_mask = rd16(p + 10);
+    out.battery_charge = p[12];
+    out.battery_voltage_mv = rd16(p + 13);
+    out.pallet_count = rd16(p + 15);
+    out.state_flags = p[17];
+    return len == kSize ? CodecResult::Ok : CodecResult::OutOfBounds;
+}
+
+std::uint16_t encode_event_body(std::uint8_t* buf, std::uint16_t cap, const EventBody& b)
+{
+    constexpr std::uint16_t kSize = 12;
+    if (cap < kSize)
+    {
+        return 0;
+    }
+    wr16(buf, b.event_id);
+    buf[2] = b.severity;
+    buf[3] = b.ctx_kind;
+    wr32(buf + 4, b.ctx_value);
+    wr32(buf + 8, b.ctx_value2);
+    return kSize;
+}
+
+CodecResult decode_event_body(const std::uint8_t* p, std::uint16_t len, EventBody& out)
+{
+    constexpr std::uint16_t kSize = 12;
+    if (len < kSize)
+    {
+        return CodecResult::Truncated;
+    }
+    out.event_id = rd16(p);
+    out.severity = p[2];
+    out.ctx_kind = p[3];
+    out.ctx_value = rd32(p + 4);
+    out.ctx_value2 = rd32(p + 8);
+    return len == kSize ? CodecResult::Ok : CodecResult::OutOfBounds;
+}
+
+std::uint16_t encode_log_body(std::uint8_t* buf, std::uint16_t cap, const LogBody& b)
+{
+    constexpr std::uint16_t kFixed = 2; // level + module_id
+    const std::uint16_t text_len = b.text_len <= 80u ? b.text_len : static_cast<std::uint16_t>(80u);
+    const std::uint16_t size = static_cast<std::uint16_t>(kFixed + text_len);
+    if (cap < size)
+    {
+        return 0;
+    }
+    buf[0] = b.level;
+    buf[1] = b.module_id;
+    for (std::uint16_t i = 0; i < text_len; ++i)
+    {
+        buf[kFixed + i] = b.text[i];
+    }
+    return size;
+}
+
+CodecResult decode_log_body(const std::uint8_t* p, std::uint16_t len, LogBody& out)
+{
+    constexpr std::uint16_t kFixed = 2;
+    if (len < kFixed)
+    {
+        return CodecResult::Truncated;
+    }
+    out.level = p[0];
+    out.module_id = p[1];
+    out.text_len = static_cast<std::uint16_t>(len - kFixed);
+    if (out.text_len > 80u)
+    {
+        return CodecResult::OutOfBounds;
+    }
+    for (std::uint16_t i = 0; i < out.text_len; ++i)
+    {
+        out.text[i] = p[kFixed + i];
+    }
+    return CodecResult::Ok;
+}
+
+std::uint16_t encode_trace_header(std::uint8_t* buf, std::uint16_t cap, const TraceBodyHeader& h)
+{
+    constexpr std::uint16_t kSize = 11;
+    if (cap < kSize)
+    {
+        return 0;
+    }
+    buf[0] = h.kind;
+    wr16(buf + 1, h.trigger_event_id);
+    wr32(buf + 3, h.trigger_tick);
+    wr32(buf + 7, h.payload_len);
+    return kSize;
+}
+
+CodecResult decode_trace_header(const std::uint8_t* p, std::uint16_t len, TraceBodyHeader& out)
+{
+    constexpr std::uint16_t kSize = 11;
+    if (len < kSize)
+    {
+        return CodecResult::Truncated;
+    }
+    out.kind = p[0];
+    out.trigger_event_id = rd16(p + 1);
+    out.trigger_tick = rd32(p + 3);
+    out.payload_len = rd32(p + 7);
+    return len == kSize ? CodecResult::Ok : CodecResult::OutOfBounds;
+}
+
 } // namespace codec
 } // namespace v3

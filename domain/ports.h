@@ -12,38 +12,12 @@
 namespace slice
 {
 
-// UART transport adapter: byte budget per tick (display 230, radio 57, BMS 10).
-// Never blocks: DMA or producer-budget (issue #43 section 4, obligation #12).
-struct UartPort
-{
-    virtual std::uint32_t tx_bytes_available() const = 0;
-    virtual bool tx(const std::uint8_t* data, std::uint32_t len) = 0;
-    virtual std::uint32_t rx_drain(std::uint8_t* out, std::uint32_t budget) = 0;
-};
-
 // Flash persistence adapter (journal, sector 7, 128 KB, 512 B pages).
 // Quiescence C6: save window <= 4 s; single atomic blocking window.
 struct FlashPort
 {
     virtual std::uint32_t erase_sector() = 0;  // returns measured ms
     virtual std::uint32_t program_page(const std::uint8_t* data) = 0; // returns measured ms
-};
-
-// Observability sink: bounded queues with per-class overload policy
-// (telemetry 8 drop-oldest, events 32 / logs 32 drop-newest, traces 16).
-// Counters live here; every drop/reject increments a counter (issue #43 section 6).
-struct ObservabilityPort
-{
-    enum class Class : std::uint8_t
-    {
-        Telemetry = 0,
-        Events = 1,
-        Logs = 2,
-        Traces = 3,
-    };
-
-    virtual bool emit(Class cls, const std::uint8_t* data, std::uint32_t len) = 0;
-    virtual std::uint32_t dropped(Class cls) const = 0;
 };
 
 } // namespace slice
@@ -271,5 +245,37 @@ struct OutboundControl
 //     Потребитель - Safety Authority (INV-LEASE-STOP: expiry -> stop-intent
 //     CONTROLLED bounded). Производитель - Manual Session.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Observability ports (design docs/observability-design-v3.md section 4.2;
+// ticket #72). Implemented by adapters; the domain Sink policy depends on the
+// interfaces only (ports-and-adapters, dependencies point inward).
+// ---------------------------------------------------------------------------
+
+// UART TX (adapter adapters/uart_bridge): USART1 PA9/PA10, 230400 8E1, ring
+// 256 B + TXE interrupt. NEVER blocks: tx() returns false when the ring has
+// no room (the Sink applies drop + counter via Producer). Foreground-only
+// calls; the TXE ISR only moves ring->TDR (rule R2, #43 section 3.2).
+struct UartPort
+{
+    virtual std::uint32_t tx_bytes_available() const = 0; // free ring bytes
+    virtual bool tx(const std::uint8_t* data, std::uint32_t len) = 0; // false: not accepted
+};
+
+// Wall-clock (adapter adapters/rtc_clock): read-only epoch sec + quality.
+// SetWallClock (mutation) is a Service-class op, outside #72 (#75/#76).
+struct WallClockSource
+{
+    virtual std::uint32_t epoch_sec() const = 0;
+    virtual codec::TimeValidity time_validity() const = 0; // Unsynced until SetWallClock in epoch
+};
+
+// Identity (adapter adapters/identity): STM32 UID, read-only. Called only
+// while assembling the snapshot (rare, bounded). FW version / build id /
+// serial are outside #72 (release infra, provisioning #76): snapshot fields 0.
+struct IdentitySource
+{
+    virtual std::uint32_t hardware_id() const = 0; // 96-bit UID, high 32 bits
+};
 
 } // namespace v3
