@@ -943,8 +943,9 @@ flowchart TD
 | T44 | test_semantic_integration | Отсутствие transport-диалектов: один кодек обслуживает оба профиля (одинаковые байты одинаково декодируются независимо от ingress; acceptance #74) | профильная таблица | host |
 | T45 | test_semantic | Control-plane handshake gate: stop/subscribe pre-handshake -> HandshakeRequired-событие, БЕЗ мутации (#47 §5.1, review MAJOR-2 fix) | SemEnv с пустым grant | host |
 | T46 | test_semantic | Stop authority binding: stop чужого principal -> Unauthorized-событие, экземпляр НЕ стопается; владелец стопает (Cancelled) | два contract на общем runtime | host |
-| T47 | test_runtime | Deferred parent никогда не пере-вызывается: root с ДВУМЯ детьми, terminal Succeeded НЕ превращается в Cancelled (review MAJOR-1 fix) | driver_spawn_two | host |
+| T47 | test_runtime | Deferred parent никогда не пере-вызывается: root с ДВУМЯ детьми, driver отвечает Cancel если его пере-вызовут со stop_requested (дискриминирует pre-fix); terminal Succeeded (7), НЕ Cancelled (1) (review MAJOR-1 fix) | driver_spawn_two_stop_aware | host |
 | T48 | test_semantic | Unknown control msgType -> drop + TransportError::UnknownMessage (#47 §18 #1) | msgType 0x7F | host |
+| T49 | test_runtime | Yield из Stopping ведёт себя как Continue: driver пере-вызывается каждый advance (нет вечного парка/утечки слота, review MINOR-5 fix) | yield+count driver, stop, 2× advance | host |
 
 Свойства (RapidCheck, #52 property): для любого потока произвольных байтов decode не падает и не принимает не-CRC-валидные кадры (T9); для любой последовательности запросов (в пределах budgets) bounded storage держится — ledger ≤ 16×8, экземпляры ≤ 8, подписки ≤ 8, никакого роста аллокаций (T42).
 

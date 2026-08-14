@@ -416,6 +416,50 @@ inline v3::runtime::DriverEvent driver_spawn_two(void* ctx, const v3::runtime::O
     return e;
 }
 
+// Spawns TWO children (types 2 and 3, driver_complete), then on a child
+// outcome completes with 7 - OR cancels with 1 if stop was requested while
+// waiting (discriminates the deferred-parent re-drive fix: pre-fix the woken
+// pending parent would be re-driven with stop_requested and flip to Cancelled).
+struct SpawnTwoStopCtx
+{
+    std::uint8_t spawned = 0;
+};
+
+inline v3::runtime::DriverEvent driver_spawn_two_stop_aware(void* ctx, const v3::runtime::OperationEnv& env)
+{
+    auto* c = static_cast<SpawnTwoStopCtx*>(ctx);
+    v3::runtime::DriverEvent e;
+    if (c->spawned == 0)
+    {
+        c->spawned = 1;
+        e.kind = v3::runtime::DriverEventKind::Spawn;
+        e.spawn_type = 2;
+        e.spawn_fn = driver_complete;
+        e.spawn_ctx = nullptr;
+        return e;
+    }
+    if (c->spawned == 1)
+    {
+        c->spawned = 2;
+        e.kind = v3::runtime::DriverEventKind::Spawn;
+        e.spawn_type = 3;
+        e.spawn_fn = driver_complete;
+        e.spawn_ctx = nullptr;
+        return e;
+    }
+    if (env.child_terminal)
+    {
+        // A re-drive of a DEFERRED parent (pre-fix bug) arrives with
+        // stop_requested=true and child_terminal=true -> would Cancel.
+        e.kind = env.stop_requested ? v3::runtime::DriverEventKind::Cancel
+                                    : v3::runtime::DriverEventKind::Complete;
+        e.outcome.code = env.stop_requested ? 1 : 7;
+        return e;
+    }
+    e.kind = v3::runtime::DriverEventKind::Yield;
+    return e;
+}
+
 // Counts invocations (for the one-instance-per-call boundedness check).
 inline v3::runtime::DriverEvent driver_count(void* ctx, const v3::runtime::OperationEnv&)
 {

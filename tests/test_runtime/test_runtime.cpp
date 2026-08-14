@@ -258,10 +258,13 @@ TEST(Runtime, DeferredParentNeverRedrivenWithTwoChildren)
 {
     // #13: parent stays Stopping until ALL descendants are terminal; the
     // deferred parent's driver is NEVER re-invoked (review MAJOR-1 fix).
+    // The driver answers Cancel if it is ever re-driven with stop_requested
+    // (the pre-fix behavior) - the test discriminates: pre-fix the woken
+    // pending parent would terminate Cancelled (1) instead of Succeeded (7).
     RtEnv env;
-    test::SpawnTwoCtx ctx;
+    test::SpawnTwoStopCtx ctx;
     std::uint32_t root = 0;
-    ASSERT_EQ(env.rt.create_root(env.make(1, 0, test::driver_spawn_two,
+    ASSERT_EQ(env.rt.create_root(env.make(1, 0, test::driver_spawn_two_stop_aware,
                                           v3::slot::Activity::Idle, &ctx),
                                  root),
               CreateResult::Accepted);
@@ -273,11 +276,43 @@ TEST(Runtime, DeferredParentNeverRedrivenWithTwoChildren)
     EXPECT_TRUE(env.rt.is_active(root)); // stays Stopping while C2 is active
     env.rt.advance(1005); // C2: Complete -> notify -> resolve deferred root
     EXPECT_FALSE(env.rt.is_active(root));
-    EXPECT_FALSE(env.rt.is_active(0u)); // no instances left
     EXPECT_EQ(env.events.terminal_count, 3u);
     // Root terminates Succeeded (code 7), NOT Cancelled: the deferred driver
     // was never re-run with stop_requested (review MAJOR-1 scenario).
     EXPECT_EQ(env.events.terminal[2].code, 7u);
+}
+
+TEST(Runtime, StoppingYieldKeepsAdvancingNoEternalPark)
+{
+    // Review MINOR-5 fix: Yield from Stopping behaves like Continue - the
+    // driver is re-driven every advance (no eternal park, no silent stall).
+    struct YieldCount
+    {
+        std::uint32_t calls = 0;
+    } yc;
+    auto yield_count = [](void* c, const v3::runtime::OperationEnv&) -> v3::runtime::DriverEvent {
+        auto* s = static_cast<YieldCount*>(c);
+        ++s->calls;
+        v3::runtime::DriverEvent e;
+        e.kind = v3::runtime::DriverEventKind::Yield;
+        return e;
+    };
+
+    RtEnv env;
+    std::uint32_t op = 0;
+    ASSERT_EQ(env.rt.create_root(env.make(1, 0, yield_count, v3::slot::Activity::Idle, &yc), op),
+              CreateResult::Accepted);
+    env.rt.advance(2000); // Yield -> parked (Running): skipped by later advances
+    EXPECT_EQ(yc.calls, 1u);
+    env.rt.advance(2001);
+    EXPECT_EQ(yc.calls, 1u); // parked: not re-driven while Running
+
+    env.rt.stop(op);       // Stopping: Yield must NOT park anymore
+    env.rt.advance(2002);  // re-driven despite Yield (parked stays false)
+    EXPECT_EQ(yc.calls, 2u);
+    env.rt.advance(2003);
+    EXPECT_EQ(yc.calls, 3u); // keeps advancing every tick - no eternal park
+    EXPECT_TRUE(env.rt.is_active(op));
 }
 
 } // namespace
