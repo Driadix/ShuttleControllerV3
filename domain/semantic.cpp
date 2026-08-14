@@ -105,6 +105,10 @@ void SemanticContract::handle_operation_request(const codec::DecodedFrame& f)
     }
 
     const AdmitOutcome out = admit(req);
+    if (out.replay && m_events != nullptr)
+    {
+        m_events->request_duplicate(req.request_id, false); // stored result replayed (#13)
+    }
     if (out.accepted)
     {
         codec::AdmissionAckPositive ack;
@@ -117,14 +121,7 @@ void SemanticContract::handle_operation_request(const codec::DecodedFrame& f)
         return;
     }
 
-    if (out.replay)
-    {
-        if (m_events != nullptr)
-        {
-            m_events->request_duplicate(req.request_id, false);
-        }
-    }
-    else if (m_events != nullptr)
+    if (!out.replay && m_events != nullptr)
     {
         m_events->admission_rejected(static_cast<std::uint8_t>(out.reject));
     }

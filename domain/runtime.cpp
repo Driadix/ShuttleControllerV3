@@ -168,9 +168,11 @@ void Runtime::advance(std::uint64_t now)
         {
             continue; // defensive: type registry invariant
         }
-        if (inst.parked && !inst.child_terminal && inst.state != OpState::Stopping)
+        if (inst.parked && !inst.child_terminal)
         {
-            continue; // Yield: parked until woken (child completion / stop / fault)
+            continue; // Yield: parked until woken (child completion / stop / fault);
+                      // deferred terminals (pending) resolve via notify_parent,
+                      // never by re-driving the driver
         }
 
         OperationEnv env;
@@ -230,11 +232,12 @@ void Runtime::apply(const DriverEvent& ev, std::uint32_t idx)
         {
             cr.params[k] = ev.spawn_params[k];
         }
-        // NOTE: Phase 3 supplies the child driver from the type registry; the
-        // shell inherits the parent driver as a placeholder.
-        cr.fn = inst.fn;
-        cr.ctx = inst.ctx;
-        const CreateResult res = create_child(cr);
+        // Child driver: supplied by the Spawn event (Phase 3: type registry);
+        // falls back to the parent driver as a placeholder.
+        cr.fn = ev.spawn_fn != nullptr ? ev.spawn_fn : inst.fn;
+        cr.ctx = ev.spawn_fn != nullptr ? ev.spawn_ctx : inst.ctx;
+        std::uint32_t child_op_id = 0;
+        const CreateResult res = create_child(cr, child_op_id);
         if (res != CreateResult::Accepted)
         {
             // Failed spawn -> the parent sees a failed child outcome on its
@@ -264,6 +267,58 @@ void Runtime::apply(const DriverEvent& ev, std::uint32_t idx)
 }
 
 void Runtime::terminate(std::uint32_t idx, OpState final_state, const Outcome& o)
+{
+    Instance& inst = m_instances[idx];
+    if (has_active_descendants(inst.op_id))
+    {
+        // #13: parent remains Stopping while descendants are active and
+        // delegated resources are not released; the terminal is deferred and
+        // resolved when the LAST child terminates (finalize from notify_parent).
+        // Parked: never re-driven (the driver already returned its terminal
+        // event); only notify_parent can resolve the pending terminal.
+        inst.state = OpState::Stopping;
+        inst.parked = true;
+        inst.pending_terminal = true;
+        inst.pending_state = final_state;
+        inst.pending_outcome = o;
+        return;
+    }
+    finalize(idx, final_state, o);
+}
+
+bool Runtime::has_active_descendants(std::uint32_t op_id) const
+{
+    for (std::uint32_t i = 0; i < m_count; ++i)
+    {
+        const Instance& inst = m_instances[i];
+        if (inst.op_id == op_id)
+        {
+            continue;
+        }
+        if (inst.state != OpState::Accepted && inst.state != OpState::Running &&
+            inst.state != OpState::Stopping)
+        {
+            continue;
+        }
+        std::uint32_t a = inst.parent_op_id;
+        while (a != 0)
+        {
+            if (a == op_id)
+            {
+                return true;
+            }
+            const std::int32_t p = find(a);
+            if (p < 0)
+            {
+                break;
+            }
+            a = m_instances[static_cast<std::uint32_t>(p)].parent_op_id;
+        }
+    }
+    return false;
+}
+
+void Runtime::finalize(std::uint32_t idx, OpState final_state, const Outcome& o)
 {
     Instance& inst = m_instances[idx];
     inst.state = final_state;
@@ -308,6 +363,18 @@ void Runtime::notify_parent(std::uint32_t parent_op_id, const Outcome& o)
     pinst.child_terminal = true;
     pinst.child_outcome = o;
     pinst.parked = false; // wake
+    if (pinst.pending_terminal && !has_active_descendants(pinst.op_id))
+    {
+        // The last child terminated: resolve the deferred terminal (#13).
+        pinst.pending_terminal = false;
+        const OpState pending = pinst.pending_state;
+        const Outcome pending_outcome = pinst.pending_outcome;
+        const std::int32_t p2 = find(pinst.op_id);
+        if (p2 >= 0)
+        {
+            finalize(static_cast<std::uint32_t>(p2), pending, pending_outcome);
+        }
+    }
 }
 
 Runtime::StopResult Runtime::stop(std::uint32_t op_id)

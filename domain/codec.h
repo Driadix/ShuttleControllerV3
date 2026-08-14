@@ -261,6 +261,11 @@ std::uint16_t encode_ack_pos(std::uint8_t* buf, std::uint16_t cap, const Admissi
 std::uint16_t encode_ack_neg(std::uint8_t* buf, std::uint16_t cap, const AdmissionAckNegative& a);
 std::uint16_t encode_sub_ack(std::uint8_t* buf, std::uint16_t cap, const SubscriptionAck& a);
 
+// Symmetric decoders (used by tests and the transport adapter #75).
+CodecResult decode_ack_pos(const std::uint8_t* p, std::uint16_t len, AdmissionAckPositive& out);
+CodecResult decode_ack_neg(const std::uint8_t* p, std::uint16_t len, AdmissionAckNegative& out);
+CodecResult decode_sub_ack(const std::uint8_t* p, std::uint16_t len, SubscriptionAck& out);
+
 // CRC-32 (IEEE) over the canonical identity+payload fields
 // (role, operation_type, parent_operation_id, params) - idempotency
 // fingerprint (design section 2.3; #13 conflict semantics).

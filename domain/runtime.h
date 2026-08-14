@@ -50,15 +50,6 @@ enum class DriverEventKind : std::uint8_t
     Cancel = 5,   // terminal cancel - honored only while Stopping (#13)
 };
 
-struct DriverEvent
-{
-    DriverEventKind kind = DriverEventKind::Continue;
-    std::uint16_t spawn_type = 0;
-    std::uint8_t spawn_params_len = 0;
-    std::uint8_t spawn_params[64] = {};
-    Outcome outcome;
-};
-
 // Read-only environment for a driver step (bounded, single-writer #43 §4).
 struct OperationEnv
 {
@@ -71,7 +62,20 @@ struct OperationEnv
     Outcome child_outcome;
 };
 
+struct DriverEvent; // forward: DriverFn is a function pointer to it
+
 using DriverFn = DriverEvent (*)(void* ctx, const OperationEnv& env);
+
+struct DriverEvent
+{
+    DriverEventKind kind = DriverEventKind::Continue;
+    std::uint16_t spawn_type = 0;
+    std::uint8_t spawn_params_len = 0;
+    std::uint8_t spawn_params[64] = {};
+    DriverFn spawn_fn = nullptr; // Spawn: child driver (Phase 3: type registry supplies it)
+    void* spawn_ctx = nullptr;
+    Outcome outcome;
+};
 
 // Create request mapped by the Semantic Contract from codec::OperationRequest
 // (runtime does not depend on the codec; dependency matrix, design 4.1).
@@ -102,6 +106,12 @@ struct Instance
     DriverFn fn = nullptr;
     void* ctx = nullptr;
     Outcome outcome;
+    // Deferred terminal (#13: parent stays Stopping until descendants are
+    // terminal and delegated resources are released): set when terminate()
+    // is called while the instance still has active descendants.
+    bool pending_terminal = false;
+    OpState pending_state = OpState::Accepted;
+    Outcome pending_outcome;
 };
 
 class Runtime
@@ -163,6 +173,8 @@ class Runtime
     std::uint32_t next_op_id();
     void apply(const DriverEvent& ev, std::uint32_t idx);
     void terminate(std::uint32_t idx, OpState final_state, const Outcome& o);
+    void finalize(std::uint32_t idx, OpState final_state, const Outcome& o);
+    bool has_active_descendants(std::uint32_t op_id) const;
     void release_slot(const Instance& inst);
     void notify_parent(std::uint32_t parent_op_id, const Outcome& o);
     void mark_stopping_recursive(std::uint32_t op_id);

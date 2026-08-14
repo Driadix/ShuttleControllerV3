@@ -9,7 +9,7 @@
 ## §0 Решения владельца (2026-08-14, HITL-брифинг #74)
 
 1. **Idempotency ledger**: глубина **8** записей на **resolved** `authorityId`, политика исчерпания — **FIFO-eviction**; запись 12 Б `{requestId u32, fingerprint u32, outcome u32}`; 16 principals (#48 §6) × 8 × 12 = **1536 Б** RAM. Повтор после вытеснения документированно не распознаётся — как обещает #13 («Если запись вытеснена из bounded ledger, protocol больше не обещает распознать повтор»). Пересмотр: > 8 pending per principal на L4.
-2. **Потолок Operation Runtime**: **8** активных экземпляров, глубина дерева владения ≤ **8**; запись ~32 Б → **256 Б** RAM. `InstancesFull` — типизированный отказ (bounded storage, acceptance #74). Пересмотр: фактическая глубина деревьев композиции на первом составном capability-слайсе Фазы 3.
+2. **Потолок Operation Runtime**: **8** активных экземпляров, глубина дерева владения ≤ **8**; запись ~44 Б (включая deferred-terminal и child-outcome поля) → ~352 Б RAM. `InstancesFull` — типизированный отказ (bounded storage, acceptance #74). Пересмотр: фактическая глубина деревьев композиции на первом составном capability-слайсе Фазы 3.
 3. **Границы**: codec (contract core, #47 §2) — **domain-side чистый модуль** `domain/codec.*` (canonical frame + typed codecs + registries), общий для обоих профилей, fuzz-testable; **в #74** — inbound-очереди (Control 18 / Service 8 / Update 4, reserve-семантика #43 §6) + Semantic Contract & Admission + Operation Runtime + subscriptions + query/subscription control plane; **в #72** — outbound-очереди/TX, snapshot-документ и счётчики (Observability Producer + Sink). «Сводка дерева операций» в snapshot (#49 §2.6) — read-only снапшот Runtime.
 4. **Порядок admission — строго #13** (шаги 1–7): envelope/epoch/authority/права типа → schema параметров → preconditions + safety permit → composition/delegation → **idempotency/conflict (шаг 5)** → доступность/эксклюзивность ресурсов → создание экземпляра. Ledger-lookup **не выносится** перед нормативные проверки; классификация same-vs-conflict выполняется по каноническому fingerprint на шаге 5, и **replay возвращает stored result без повторной резервации** (шаги 6–7 пропускаются), даже если динамические гейты (health/окно/слот) с тех пор изменились.
 
@@ -264,6 +264,8 @@ struct DriverEvent {
     std::uint16_t spawn_type;      // Spawn: operation_type субоперации
     std::uint8_t  spawn_params_len;
     std::uint8_t  spawn_params[64];
+    DriverFn      spawn_fn;        // Spawn: driver субоперации (Фаза 3: type registry)
+    void*         spawn_ctx;
     Outcome outcome;               // Complete/Fail/Cancel
 };
 using DriverFn = DriverEvent (*)(void* ctx, const OperationEnv& env);
@@ -293,7 +295,8 @@ class Runtime {
     static constexpr std::uint32_t MaxActiveInstances = 8;  // §0.2
     static constexpr std::uint32_t MaxTreeDepth       = 8;
 
-    enum class CreateResult : std::uint8_t { Accepted, InstancesFull, TreeCycle, ParentMissing, EdgeDenied };
+    enum class CreateResult : std::uint8_t { Accepted, InstancesFull, TreeCycle, DepthExceeded,
+                                             ParentMissing, EdgeDenied, ExclusiveBusy };
     enum class StopResult  : std::uint8_t { Accepted, Unknown };
 
     void init(EpochSource* epoch, RuntimeEvents* events, ExclusiveSlot* slot);
@@ -492,11 +495,15 @@ process_frame(DecodedFrame):
  12. preconditions типа + safety permit (динамическая часть)                        -> тип-специфичный код
   ---------------------------------------------------------------
   # шаг 7: создание экземпляра и фиксация начального lifecycle
- 13. runtime.create_root/child -> Accepted | InstancesFull | TreeCycle | ...
+13. runtime.create_root/child -> Accepted | InstancesFull | ...     # откат резервации: слот не заявлен при InstancesFull (проверка ёмкости до claim)
      (InstancesFull -> AdmissionAckNegative(InstancesFull); bounded storage)
- 14. ledger.store(epoch, authorityId, {request_id, fp, outcome})   # Accepted -> operationId
- 15. AdmissionAckPositive {request_id, epoch, operation_id, type, parent}  # или Negative (без operationId, #47 §18 #5)
-     events.operation_started(op_id, type_id)                     # 0x06xx
+14. ledger.store(epoch, authorityId, {request_id, fp, outcome})   # Accepted -> operationId;
+     # REJECTED outcomes (гейты/InstancesFull/ResourceConflict) ТОЖЕ хранятся (kind=1) -
+     # иначе replay отклонённого запроса после изменения гейтов вернул бы иной результат (#13
+     # «тот же admission result»; §2.4). Отказы ДО lookup (epoch/роли/тип/schema/композиция)
+     # детерминированы и не хранятся.
+15. AdmissionAckPositive {request_id, epoch, operation_id, type, parent}  # или Negative (без operationId, #47 §18 #5)
+     events.operation_started(op_id, type_id)                     # 0x06xx; replay -> events.request_duplicate
 ```
 
 Порядок 4–6 (schema/preconditions/composition) детерминирован для данного payload — поэтому replay того же запроса проходит шаги 1–6 идентично и попадает в lookup на шаге 7 (нормативный шаг 5). Динамические гейты (window/health/provisioning/slot) — строго ПОСЛЕ lookup; это и даёт «тот же admission result» при изменившихся гейтах без раннего bypass.
@@ -534,7 +541,9 @@ stop(op_id):
   state == Accepted -> Stopping (не начат)
   каскад: все активные descendants -> Stopping (рекурсивно, bounded по глубине <= 8)
   parent остаётся Stopping, пока descendants не терминальны и делегированные ресурсы
-  не освобождены (#13 «parent остаётся Stopping, пока descendants безопасно не завершены»)
+  не освобождены (#13 «parent остаётся Stopping, пока descendants безопасно не завершены»);
+  реализация: terminal parent DEFERRED (pending_terminal + parked, driver не перевызывается),
+  разрешается в notify_parent при терминале последнего child
   Stopping -> Cancelled: все descendants терминальны и stop завершён
   Stopping -> Failed: driver не смог завершить safe stop (сигнал из driver, #13)
 
@@ -579,7 +588,7 @@ store(epoch, authorityId, entry):
 | `domain/codec.*` | — (чистый: stdint только) | Arduino Core, адаптеров, domain |
 | `domain/queues.h` | `domain/static_queue.h` | Arduino, codec (байтовый контейнер) |
 | `domain/semantic.*` | `domain/codec.h`, `domain/ports.h` (Epoch/Window/Health/Provisioning, RuntimeEvents, Outbound), `domain/runtime.h`, `domain/subscriptions.h`, `domain/queue` | Arduino, адаптеров |
-| `domain/runtime.*` | `domain/ports.h` (EpochSource, RuntimeEvents), `domain/slot.h` | codec (экземпляр не знает wire), Arduino |
+| `domain/runtime.*` | `domain/codec.h` (только OutcomeCode-реестр), `domain/ports.h` (EpochSource, RuntimeEvents), `domain/slot.h` | wire encode/decode (кодеки не вызывает), Arduino |
 | `domain/subscriptions.*` | `domain/codec.h` (QueueClass), `domain/ports.h` (RuntimeEvents) | Arduino, транспорт |
 | `domain/slot.h` | — | — |
 | `platform/admission_glue.*` | `platform/execution_core.h`, `domain/*`, `domain/ports.h` | Arduino (host-buildable, паттерн sensing_schedule) |
@@ -895,7 +904,7 @@ flowchart TD
 | T30 | test_runtime | Stop: root → Stopping + каскад на descendants; parent ждёт descendants (Stopping); все терминальны → Cancelled; повторный stop идемпотентен (#13) | stop(root), assert состояний | host |
 | T31 | test_runtime | Stopping→Failed: driver не завершает safe stop → Failed (#13) | driver возвращает Fail из Stopping | host |
 | T32 | test_runtime | Fault cascade: latched fault → активные → Stopping; slot освобождён после терминала (#46 §10) | fault_cascade() | host |
-| T33 | test_runtime | Budget: driver, продвигающий время > T_step внутри вызова → overrun-событие (#48 §4) | FakeEpoch advance | host |
+| T33 | test_runtime | Budget: advance обрабатывает РОВНО один экземпляр за вызов (dispatch contract #70 §2.1); длительность шага меряет kernel целиком (step_overrun, #70) | 3 активных, advance ×1, счётчик вызовов | host |
 | T34 | test_runtime | Субоперация: Complete child → parent.env.child_terminal + outcome; делегированные ресурсы освобождаются на терминале (#13) | spawn/complete | host |
 | T35 | test_subscriptions | Caps: 9-я подписка на bridge → CapsExceeded (#49 §9) | заполнение | host |
 | T36 | test_subscriptions | Интерес: telemetry-interest = подписка ∨ profile default (bridge: telemetry+events; radio: events); logs/traces — только по подписке | классы × профили | host |

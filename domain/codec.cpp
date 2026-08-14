@@ -102,7 +102,7 @@ DecodeResult decode(const std::uint8_t* buf, std::uint16_t len)
         result.error = TransportError::Truncated;
         return result;
     }
-    if (rd16(buf + 10 + h.payload_len) != crc16(buf + 2, static_cast<std::uint16_t>(10 + h.payload_len)))
+    if (rd16(buf + 10 + h.payload_len) != crc16(buf + 2, static_cast<std::uint16_t>(8 + h.payload_len)))
     {
         result.error = TransportError::BadCrc;
         return result;
@@ -152,7 +152,7 @@ std::uint16_t encode(std::uint8_t* buf, std::uint16_t cap, const Header& h,
             buf[10 + i] = payload[i];
         }
     }
-    wr16(buf + 10 + payload_len, crc16(buf + 2, static_cast<std::uint16_t>(10 + payload_len)));
+    wr16(buf + 10 + payload_len, crc16(buf + 2, static_cast<std::uint16_t>(8 + payload_len)));
     return total;
 }
 
@@ -268,6 +268,47 @@ std::uint16_t encode_sub_ack(std::uint8_t* buf, std::uint16_t cap, const Subscri
     buf[1] = a.accepted ? 1 : 0;
     buf[2] = a.reject_code;
     return kSize;
+}
+
+CodecResult decode_ack_pos(const std::uint8_t* p, std::uint16_t len, AdmissionAckPositive& out)
+{
+    constexpr std::uint16_t kSize = 18;
+    if (len < kSize)
+    {
+        return CodecResult::Truncated;
+    }
+    out.request_id = rd32(p);
+    out.controller_epoch = rd32(p + 4);
+    out.operation_id = rd32(p + 8);
+    out.operation_type = rd16(p + 12);
+    out.parent_operation_id = rd32(p + 14);
+    return len == kSize ? CodecResult::Ok : CodecResult::OutOfBounds;
+}
+
+CodecResult decode_ack_neg(const std::uint8_t* p, std::uint16_t len, AdmissionAckNegative& out)
+{
+    constexpr std::uint16_t kSize = 9;
+    if (len < kSize)
+    {
+        return CodecResult::Truncated;
+    }
+    out.request_id = rd32(p);
+    out.controller_epoch = rd32(p + 4);
+    out.reject_code = p[8];
+    return len == kSize ? CodecResult::Ok : CodecResult::OutOfBounds;
+}
+
+CodecResult decode_sub_ack(const std::uint8_t* p, std::uint16_t len, SubscriptionAck& out)
+{
+    constexpr std::uint16_t kSize = 3;
+    if (len < kSize)
+    {
+        return CodecResult::Truncated;
+    }
+    out.sub_id = p[0];
+    out.accepted = p[1] != 0;
+    out.reject_code = p[2];
+    return len == kSize ? CodecResult::Ok : CodecResult::OutOfBounds;
 }
 
 std::uint32_t request_fingerprint(const OperationRequest& r)

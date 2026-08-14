@@ -41,16 +41,104 @@ class InboundQueue
     static constexpr std::uint32_t UpdateCapacity = 4;
 
     // reserve=true (stop/handshake): dedicated reserve slot, never rejected by
-    // a full working queue. reserve=false + full: rejected (observable counter).
-    // Never blocks (#43 section 6).
-    bool push(Class cls, const Frame& f, bool reserve);
+    // a full working queue. reserve=false + full: rejected (observable counter,
+    // obs #7). Never blocks (#43 section 6).
+    bool push(Class cls, const Frame& f, bool reserve)
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            if (m_control.push(f))
+            {
+                return true;
+            }
+            if (reserve && m_control_reserve.push(f))
+            {
+                return true;
+            }
+            if (!reserve)
+            {
+                ++m_rejected_control;
+            }
+            return false;
+        case Class::Service:
+            if (m_service.push(f))
+            {
+                return true;
+            }
+            ++m_rejected_service;
+            return false;
+        case Class::Update:
+            if (m_update.push(f))
+            {
+                return true;
+            }
+            ++m_rejected_update;
+            return false;
+        }
+        return false;
+    }
 
     // Popping prefers reserve slots first (stop/handshake drain with priority).
-    bool pop(Class cls, Frame& out);
+    bool pop(Class cls, Frame& out)
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            if (m_control_reserve.pop(out))
+            {
+                return true;
+            }
+            return m_control.pop(out);
+        case Class::Service:
+            return m_service.pop(out);
+        case Class::Update:
+            return m_update.pop(out);
+        }
+        return false;
+    }
 
-    bool is_full(Class cls) const;
-    std::uint32_t size(Class cls) const;
-    std::uint32_t rejected(Class cls) const; // reject-on-admission counter (obs #7)
+    bool is_full(Class cls) const
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            return m_control.full() && m_control_reserve.full();
+        case Class::Service:
+            return m_service.full();
+        case Class::Update:
+            return m_update.full();
+        }
+        return false;
+    }
+
+    std::uint32_t size(Class cls) const
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            return static_cast<std::uint32_t>(m_control.size() + m_control_reserve.size());
+        case Class::Service:
+            return static_cast<std::uint32_t>(m_service.size());
+        case Class::Update:
+            return static_cast<std::uint32_t>(m_update.size());
+        }
+        return 0;
+    }
+
+    std::uint32_t rejected(Class cls) const
+    {
+        switch (cls)
+        {
+        case Class::Control:
+            return m_rejected_control;
+        case Class::Service:
+            return m_rejected_service;
+        case Class::Update:
+            return m_rejected_update;
+        }
+        return 0;
+    }
 
   private:
     slice::StaticQueue<Frame, ControlCapacity> m_control;
