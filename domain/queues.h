@@ -38,11 +38,12 @@ class InboundQueue
     static constexpr std::uint32_t ControlCapacity = 16; // рабочие слота
     static constexpr std::uint32_t ControlReserve = 2;   // резерв stop/handshake (#48 §6: 16+2)
     static constexpr std::uint32_t ServiceCapacity = 8;
-    static constexpr std::uint32_t UpdateCapacity = 4;
+    static constexpr std::uint32_t UpdateCapacity = 2;   // рабочие (новые транзакции)
+    static constexpr std::uint32_t UpdateReserve = 2;    // резерв in-progress (#48 §6: 2+2)
 
-    // reserve=true (stop/handshake): dedicated reserve slot, never rejected by
-    // a full working queue. reserve=false + full: rejected (observable counter,
-    // obs #7). Never blocks (#43 section 6).
+    // reserve=true (stop/handshake; update in-progress frames): dedicated
+    // reserve slot, never rejected by a full working queue. reserve=false +
+    // full: rejected (observable counter, obs #7). Never blocks (#43 §6).
     bool push(Class cls, const Frame& f, bool reserve)
     {
         switch (cls)
@@ -73,13 +74,21 @@ class InboundQueue
             {
                 return true;
             }
-            ++m_rejected_update;
+            if (reserve && m_update_reserve.push(f))
+            {
+                return true; // in-progress transaction frames keep capacity (#48 §6)
+            }
+            if (!reserve)
+            {
+                ++m_rejected_update;
+            }
             return false;
         }
         return false;
     }
 
-    // Popping prefers reserve slots first (stop/handshake drain with priority).
+    // Popping prefers reserve slots first (stop/handshake/in-progress drain
+    // with priority).
     bool pop(Class cls, Frame& out)
     {
         switch (cls)
@@ -93,6 +102,10 @@ class InboundQueue
         case Class::Service:
             return m_service.pop(out);
         case Class::Update:
+            if (m_update_reserve.pop(out))
+            {
+                return true;
+            }
             return m_update.pop(out);
         }
         return false;
@@ -107,7 +120,7 @@ class InboundQueue
         case Class::Service:
             return m_service.full();
         case Class::Update:
-            return m_update.full();
+            return m_update.full() && m_update_reserve.full();
         }
         return false;
     }
@@ -121,7 +134,7 @@ class InboundQueue
         case Class::Service:
             return static_cast<std::uint32_t>(m_service.size());
         case Class::Update:
-            return static_cast<std::uint32_t>(m_update.size());
+            return static_cast<std::uint32_t>(m_update.size() + m_update_reserve.size());
         }
         return 0;
     }
@@ -145,6 +158,7 @@ class InboundQueue
     slice::StaticQueue<Frame, ControlReserve> m_control_reserve;
     slice::StaticQueue<Frame, ServiceCapacity> m_service;
     slice::StaticQueue<Frame, UpdateCapacity> m_update;
+    slice::StaticQueue<Frame, UpdateReserve> m_update_reserve;
     std::uint32_t m_rejected_control = 0;
     std::uint32_t m_rejected_service = 0;
     std::uint32_t m_rejected_update = 0;

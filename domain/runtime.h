@@ -157,6 +157,9 @@ class Runtime
 
     bool slot_held() const { return m_slot != nullptr && m_slot->current() != slot::Activity::Idle; }
     bool is_active(std::uint32_t op_id) const; // parent-alive check for admission
+    // Owner authority of an instance (0 = unknown): stop/subscription control
+    // intents are bound to the principal (authority binding, #47 §5.1).
+    std::uint16_t authority_of(std::uint32_t op_id) const;
     std::uint32_t active_count() const { return m_count; }
 
     // Read-only snapshot for the observability snapshot assembler (#72):

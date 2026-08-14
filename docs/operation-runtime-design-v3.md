@@ -8,7 +8,7 @@
 
 ## §0 Решения владельца (2026-08-14, HITL-брифинг #74)
 
-1. **Idempotency ledger**: глубина **8** записей на **resolved** `authorityId`, политика исчерпания — **FIFO-eviction**; запись 12 Б `{requestId u32, fingerprint u32, outcome u32}`; 16 principals (#48 §6) × 8 × 12 = **1536 Б** RAM. Повтор после вытеснения документированно не распознаётся — как обещает #13 («Если запись вытеснена из bounded ledger, protocol больше не обещает распознать повтор»). Пересмотр: > 8 pending per principal на L4.
+1. **Idempotency ledger**: глубина **8** записей на **resolved** `authorityId`, политика исчерпания — **FIFO-eviction**; запись ~20 Б (Slot = epoch u32 + LedgerEntry {request_id u32, fingerprint u32, outcome u32, kind u8} → 20 Б с выравниванием); 16 principals (#48 §6) × 8 × 20 = **2560 Б** RAM (bounded; в пределах общего RAM-бюджета #48 §8). Повтор после вытеснения документированно не распознаётся — как обещает #13 («Если запись вытеснена из bounded ledger, protocol больше не обещает распознать повтор»). Пересмотр: > 8 pending per principal на L4.
 2. **Потолок Operation Runtime**: **8** активных экземпляров, глубина дерева владения ≤ **8**; запись ~44 Б (включая deferred-terminal и child-outcome поля) → ~352 Б RAM. `InstancesFull` — типизированный отказ (bounded storage, acceptance #74). Пересмотр: фактическая глубина деревьев композиции на первом составном capability-слайсе Фазы 3.
 3. **Границы**: codec (contract core, #47 §2) — **domain-side чистый модуль** `domain/codec.*` (canonical frame + typed codecs + registries), общий для обоих профилей, fuzz-testable; **в #74** — inbound-очереди (Control 18 / Service 8 / Update 4, reserve-семантика #43 §6) + Semantic Contract & Admission + Operation Runtime + subscriptions + query/subscription control plane; **в #72** — outbound-очереди/TX, snapshot-документ и счётчики (Observability Producer + Sink). «Сводка дерева операций» в snapshot (#49 §2.6) — read-only снапшот Runtime.
 4. **Порядок admission — строго #13** (шаги 1–7): envelope/epoch/authority/права типа → schema параметров → preconditions + safety permit → composition/delegation → **idempotency/conflict (шаг 5)** → доступность/эксклюзивность ресурсов → создание экземпляра. Ledger-lookup **не выносится** перед нормативные проверки; классификация same-vs-conflict выполняется по каноническому fingerprint на шаге 5, и **replay возвращает stored result без повторной резервации** (шаги 6–7 пропускаются), даже если динамические гейты (health/окно/слот) с тех пор изменились.
@@ -112,7 +112,9 @@ enum class QueueClass : std::uint8_t {      // explicit queueClass (#47 §8)
 
 enum class TransportError : std::uint8_t {  // parse/frame level (#47 §16.1)
     None = 0, BadSync = 1, BadCrc = 2, Truncated = 3,
-    PayloadTooLong = 4, UnsupportedMajor = 5, UnknownFamily = 6, EncodeCapacity = 7,
+    PayloadTooLong = 4, UnsupportedMajor = 5, UnknownFamily = 6,
+    UnknownMessage = 7,   // msgType вне реестра family (аддитивно)
+    EncodeCapacity = 8,
 };
 
 enum class RejectCode : std::uint8_t {      // AdmissionRejectionCode, стабильный (#47 §16.2, аддитивно)
@@ -124,6 +126,7 @@ enum class RejectCode : std::uint8_t {      // AdmissionRejectionCode, стаб�
     UnknownOperationType = 18,   // аддитивное расширение (#47 §16.2 «plus type-precondition codes»)
     InstancesFull = 19,          // bounded storage runtime (#74 §0.2)
     CompositionInvalid = 20,     // parent/child ребро не разрешено типом или parent не активен (#13 шаг 4/6)
+    UnknownSubscription = 21,    // unsubscribe id, не принадлежащий principal (аддитивно)
 };
 
 enum class OutcomeCode : std::uint16_t {    // OperationOutcomeCode (#13, #47 §16.3): общие семейства
@@ -408,27 +411,32 @@ enum class Class : std::uint8_t { Control = 0, Service = 1, Update = 2 };
 
 class InboundQueue {
   public:
-    static constexpr std::uint32_t ControlCapacity = 18;   // 16 рабочих + 2 резервных
+    static constexpr std::uint32_t ControlCapacity = 16; // рабочие слота
+    static constexpr std::uint32_t ControlReserve = 2;   // резерв stop/handshake (#48 §6: 16+2)
     static constexpr std::uint32_t ServiceCapacity = 8;
-    static constexpr std::uint32_t UpdateCapacity  = 4;    // 2 резерв при in-progress (#43 §6)
+    static constexpr std::uint32_t UpdateCapacity = 2;   // рабочие (новые транзакции)
+    static constexpr std::uint32_t UpdateReserve = 2;    // резерв in-progress (#48 §6: 2+2)
 
-    // reserve=true (stop/handshake) -> никогда не отклоняется (резервный слот).
-    // false + полна -> false + счётчик + событие (0x05xx) - counter у Producer.
+    // reserve=true (stop/handshake; update in-progress кадры) -> никогда не
+    // отклоняется (резервный слот). false + полна -> false + счётчик + событие
+    // (0x05xx) - counter у Producer.
     bool push(Class cls, const Frame& f, bool reserve);
-    bool pop(Class cls, Frame& out);
+    bool pop(Class cls, Frame& out);   // reserve-слоты дренажатся первыми
     bool is_full(Class cls) const;
     std::uint32_t rejected(Class cls) const;   // переполнение наблюдаемо (obs #7)
 
   private:
     StaticQueue<Frame, ControlCapacity> m_control;
+    StaticQueue<Frame, ControlReserve> m_control_reserve;
     StaticQueue<Frame, ServiceCapacity> m_service;
-    StaticQueue<Frame, UpdateCapacity>  m_update;
+    StaticQueue<Frame, UpdateCapacity> m_update;
+    StaticQueue<Frame, UpdateReserve> m_update_reserve;
 };
 
 } // namespace v3::queue
 ```
 
-RAM: (18 + 8 + 4) × 130 Б ≈ **3.9 КБ** (в бюджете #48 §6 ~14 КБ суммарно с outbound #72).
+RAM: (16 + 2 + 8 + 2 + 2) × 130 Б ≈ **3.9 КБ** (в бюджете #48 §6 ~14 КБ суммарно с outbound #72).
 
 ### 2.9 Порты гейтов (read-only снапшоты, single-writer #46 I-LC-1)
 
@@ -469,6 +477,9 @@ loop() -> kernel::run() -> process_tick()                  # 1 bounded step / ti
 
 ```text
 process_frame(DecodedFrame):
+  0. dispatch по family: Control -> ниже; другие families (Service/Update/Session/
+     Handshake payload) - свои слайсы (#75/#76/#77), header-level unknown msgType ->
+     drop + TransportError::UnknownMessage
   1. envelope: family/major/тип известны, payload валиден      -> InvalidEnvelope / UnsupportedVersion
   2. epoch: request.controller_epoch == epoch_source.epoch()   -> EpochMismatch
   3. authority/права типа: resolvedAuthorityId (transport, #75) -> grant; role запроса in grant
@@ -495,15 +506,25 @@ process_frame(DecodedFrame):
  12. preconditions типа + safety permit (динамическая часть)                        -> тип-специфичный код
   ---------------------------------------------------------------
   # шаг 7: создание экземпляра и фиксация начального lifecycle
-13. runtime.create_root/child -> Accepted | InstancesFull | ...     # откат резервации: слот не заявлен при InstancesFull (проверка ёмкости до claim)
+ 13. runtime.create_root/child -> Accepted | InstancesFull | ...     # откат резервации: слот не заявлен при InstancesFull (проверка ёмкости до claim)
      (InstancesFull -> AdmissionAckNegative(InstancesFull); bounded storage)
-14. ledger.store(epoch, authorityId, {request_id, fp, outcome})   # Accepted -> operationId;
+ 14. ledger.store(epoch, authorityId, {request_id, fp, outcome})   # Accepted -> operationId;
      # REJECTED outcomes (гейты/InstancesFull/ResourceConflict) ТОЖЕ хранятся (kind=1) -
      # иначе replay отклонённого запроса после изменения гейтов вернул бы иной результат (#13
      # «тот же admission result»; §2.4). Отказы ДО lookup (epoch/роли/тип/schema/композиция)
      # детерминированы и не хранятся.
-15. AdmissionAckPositive {request_id, epoch, operation_id, type, parent}  # или Negative (без operationId, #47 §18 #5)
+ 15. AdmissionAckPositive {request_id, epoch, operation_id, type, parent}  # или Negative (без operationId, #47 §18 #5)
      events.operation_started(op_id, type_id)                     # 0x06xx; replay -> events.request_duplicate
+
+# Другие control-интенты (review MAJOR-2 fix): mutating control plane требует handshake
+# И привязки к principal (#47 §5.1):
+#   StopIntent    -> grant.authority_id == 0 -> HandshakeRequired-событие (без мутации);
+#                    owner = runtime.authority_of(op_id); owner == 0 -> идемпотентный no-op;
+#                    owner != grant.authority_id -> Unauthorized-событие; иначе runtime.stop()
+#   Subscribe/Unsubscribe -> grant.authority_id == 0 -> HandshakeRequired-событие; иначе
+#                    registry.subscribe/unsubscribe(grant.authority_id, ...)
+#   Query          -> read-only: handshake НЕ требуется (#47 §5.1 мутирующий трафик);
+#                    гейт окна (Serving/Update/Recovery) остаётся
 ```
 
 Порядок 4–6 (schema/preconditions/composition) детерминирован для данного payload — поэтому replay того же запроса проходит шаги 1–6 идентично и попадает в lookup на шаге 7 (нормативный шаг 5). Динамические гейты (window/health/provisioning/slot) — строго ПОСЛЕ lookup; это и даёт «тот же admission result» при изменившихся гейтах без раннего bypass.
@@ -520,7 +541,10 @@ advance(now):
   ev = instance.fn(instance.ctx, env)          # <= T_step (overrun -> событие, #70)
   switch ev.kind:
     Continue -> state = Running; (перепланируется: следующий advance подхватит; deadline now+1)
-    Yield    -> парк (ждёт wake: событие/таймер; advance пропускает)
+    Yield    -> парк (ждёт wake: событие/таймер; advance пропускает). Исключение: Yield из
+                Stopping ведёт себя как Continue - stop обязан прогрессировать до терминала
+                (#13 «Stopping -> Failed, если safe stop не может завершиться»), вечный парк
+                и утечка слота исключены (review MINOR-5 fix)
     Spawn    -> create_child (ребро + делегация; InstancesFull -> driver получает отказ
                 через env.child_outcome с кодом отказа - Фаза 3 уточнит контракт отказа)
     Complete -> state = Succeeded; outcome = ev.outcome; release(slot/делегированные);
@@ -542,8 +566,9 @@ stop(op_id):
   каскад: все активные descendants -> Stopping (рекурсивно, bounded по глубине <= 8)
   parent остаётся Stopping, пока descendants не терминальны и делегированные ресурсы
   не освобождены (#13 «parent остаётся Stopping, пока descendants безопасно не завершены»);
-  реализация: terminal parent DEFERRED (pending_terminal + parked, driver не перевызывается),
-  разрешается в notify_parent при терминале последнего child
+  реализация: terminal parent DEFERRED (pending_terminal + parked, driver не перевызывается -
+  advance пропускает pending_terminal безусловно, notify_parent НЕ будит deferred parent),
+  разрешается в notify_parent при терминале последнего child (review MAJOR-1 fix)
   Stopping -> Cancelled: все descendants терминальны и stop завершён
   Stopping -> Failed: driver не смог завершить safe stop (сигнал из driver, #13)
 
@@ -630,7 +655,7 @@ struct OutboundControl {   // исходящий порт ответов (ACK/qu
 | Кадр ≤ MTU 128; payload ≤ 116; malformed → reject | #48 §6, #47 §4 | T1–T9 (codec + fuzz) |
 | Никакой динамической аллокации | #51 R1 | include-lint, clang-tidy, review |
 | Всё foreground; ISR — только TIM2 clock | #43 §3.2, R2 | review-checklist (новых ISR нет) |
-| Mutating запрещён до handshake; epoch fencing | #13, #47 §5.1 | T14 (epoch), handshake-машина — #75 (роль проверяется по grant) |
+| Mutating запрещён до handshake; epoch fencing; stop/subscribe привязаны к principal (authority binding) | #13, #47 §5.1 | T14 (epoch), T45 (stop/subscribe pre-handshake), T46 (stop cross-principal); handshake-машина — #75 (роль проверяется по grant) |
 
 ## 5. Shape of code
 
@@ -916,6 +941,10 @@ flowchart TD
 | T42 | test_semantic_integration | **Bounded storage под flood**: N запросов (N > 8 экземпляров, N > ledger depth) → InstancesFull/eviction, RAM-структуры не растут (no-alloc), счётчики наблюдаемы | flood-генератор | host |
 | T43 | test_semantic_integration | Query/subscribe/stop через полный конвейер: subscribe → birth_pending; stop → runtime.stop; query → snapshot-запрос в outbound | конвейер | host |
 | T44 | test_semantic_integration | Отсутствие transport-диалектов: один кодек обслуживает оба профиля (одинаковые байты одинаково декодируются независимо от ingress; acceptance #74) | профильная таблица | host |
+| T45 | test_semantic | Control-plane handshake gate: stop/subscribe pre-handshake -> HandshakeRequired-событие, БЕЗ мутации (#47 §5.1, review MAJOR-2 fix) | SemEnv с пустым grant | host |
+| T46 | test_semantic | Stop authority binding: stop чужого principal -> Unauthorized-событие, экземпляр НЕ стопается; владелец стопает (Cancelled) | два contract на общем runtime | host |
+| T47 | test_runtime | Deferred parent никогда не пере-вызывается: root с ДВУМЯ детьми, terminal Succeeded НЕ превращается в Cancelled (review MAJOR-1 fix) | driver_spawn_two | host |
+| T48 | test_semantic | Unknown control msgType -> drop + TransportError::UnknownMessage (#47 §18 #1) | msgType 0x7F | host |
 
 Свойства (RapidCheck, #52 property): для любого потока произвольных байтов decode не падает и не принимает не-CRC-валидные кадры (T9); для любой последовательности запросов (в пределах budgets) bounded storage держится — ledger ≤ 16×8, экземпляры ≤ 8, подписки ≤ 8, никакого роста аллокаций (T42).
 
@@ -954,11 +983,11 @@ flowchart TD
 - **Fact**: порядок admission #13 и его следствие (replay без re-reservation) зафиксированы решением владельца (§0.4).
 - **Fact**: ёмкости ledger (8×16) и экземпляров (8) — решения владельца (§0.1/§0.2); #13 и #48 их не задавали.
 - **Fact**: subscription caps 8/2, дефолты интереса, birth-паттерн — #49 §9 (не пересматриваются).
-- **Fact**: inbound очереди 18/8/4 с reserve — #48 §6/#43 §6 (числа наследуются).
+- **Fact**: inbound очереди Control 16+2 резерв / Service 8 / Update 2+2 резерв с reserve-семантикой — #48 §6/#43 §6 (числа наследуются).
 - **Assumption**: CRC32-fingerprint достаточен для same-vs-conflict классификации: коллизия требует нарушения клиентом requestId-уникальности (#13), поведение вне протокола; направление ошибки безопасно (для валидных клиентов конфликтов нет).
 - **Assumption**: `params <= 64 Б` достаточен для всех operation types Фазы 3 (MTU 128 − 12 overhead − 18 фикс = 98 доступно; 64 — запас). Пересмотр на первом capability-слайсе.
 - **Assumption**: два self-repeating шага (inbound + runtime) не нарушают T_step и латентности; фактический CPU-cost — L4-измерение (#93/#69), не проектируется аналитически.
-- **Assumption**: `UnknownOperationType`, `InstancesFull`, `CompositionInvalid` — допустимые аддитивные расширения RejectCode-реестра (#47 §16.2 «Minimum set (extensible)»).
+- **Assumption**: `UnknownOperationType`, `InstancesFull`, `CompositionInvalid`, `UnknownSubscription` (RejectCode) и `UnknownMessage` (TransportError) — допустимые аддитивные расширения реестров (#47 §16.2 «Minimum set (extensible)»).
 - **Unknown**: handshake-машина и principal-resolution (bridgePrincipalHandle → authorityId) — #75; #74 резервирует grant-модель и роли (RoleEscalation-проверку тестирует с фейковым grant).
 - **Unknown**: точный контракт driver/субопераций наполнится на Фаза 3 capability-слайсах; #74 фиксирует шаг/дерево/outcomes-каркас.
 - **Unknown**: snapshot-документ и его фрагменты — #72; «сводка дерева операций» — read-only runtime.snapshot() (контракт здесь).

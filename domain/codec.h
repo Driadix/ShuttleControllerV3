@@ -49,7 +49,8 @@ enum class TransportError : std::uint8_t
     PayloadTooLong = 4,
     UnsupportedMajor = 5,
     UnknownFamily = 6,
-    EncodeCapacity = 7,
+    UnknownMessage = 7,  // msgType not in the family registry (additive)
+    EncodeCapacity = 8,
 };
 
 // AdmissionRejectionCode - stable, additive (#47 section 16.2; design
@@ -78,6 +79,7 @@ enum class RejectCode : std::uint8_t
     UnknownOperationType = 18,
     InstancesFull = 19,
     CompositionInvalid = 20,
+    UnknownSubscription = 21, // unsubscribe of an id not owned by the principal
 };
 
 // OperationOutcomeCode - common families (#13, #47 section 16.3); per-type

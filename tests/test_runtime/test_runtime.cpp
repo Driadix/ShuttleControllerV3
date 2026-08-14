@@ -254,4 +254,30 @@ TEST(Runtime, SuboperationOutcomePropagatesToParent)
     EXPECT_EQ(env.events.terminal[1].code, 7u);   // parent terminal
 }
 
+TEST(Runtime, DeferredParentNeverRedrivenWithTwoChildren)
+{
+    // #13: parent stays Stopping until ALL descendants are terminal; the
+    // deferred parent's driver is NEVER re-invoked (review MAJOR-1 fix).
+    RtEnv env;
+    test::SpawnTwoCtx ctx;
+    std::uint32_t root = 0;
+    ASSERT_EQ(env.rt.create_root(env.make(1, 0, test::driver_spawn_two,
+                                          v3::slot::Activity::Idle, &ctx),
+                                 root),
+              CreateResult::Accepted);
+    env.rt.advance(1000); // root -> Spawn C1
+    env.rt.advance(1001); // root -> Spawn C2
+    env.rt.advance(1002); // root: Yield -> parked (no child outcome yet)
+    env.rt.advance(1003); // C1: Complete -> notify root (wake: root not pending yet)
+    env.rt.advance(1004); // root: child_terminal -> Complete -> DEFERRED (C2 active, parked)
+    EXPECT_TRUE(env.rt.is_active(root)); // stays Stopping while C2 is active
+    env.rt.advance(1005); // C2: Complete -> notify -> resolve deferred root
+    EXPECT_FALSE(env.rt.is_active(root));
+    EXPECT_FALSE(env.rt.is_active(0u)); // no instances left
+    EXPECT_EQ(env.events.terminal_count, 3u);
+    // Root terminates Succeeded (code 7), NOT Cancelled: the deferred driver
+    // was never re-run with stop_requested (review MAJOR-1 scenario).
+    EXPECT_EQ(env.events.terminal[2].code, 7u);
+}
+
 } // namespace

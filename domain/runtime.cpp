@@ -168,11 +168,11 @@ void Runtime::advance(std::uint64_t now)
         {
             continue; // defensive: type registry invariant
         }
-        if (inst.parked && !inst.child_terminal)
+        if (inst.pending_terminal || (inst.parked && !inst.child_terminal))
         {
-            continue; // Yield: parked until woken (child completion / stop / fault);
-                      // deferred terminals (pending) resolve via notify_parent,
-                      // never by re-driving the driver
+            continue; // deferred terminal: resolved ONLY via notify_parent/finalize,
+                      // never by re-driving the driver (design 3.4, #13);
+                      // parked (Yield): until woken by a child outcome / stop / fault
         }
 
         OperationEnv env;
@@ -209,7 +209,11 @@ void Runtime::apply(const DriverEvent& ev, std::uint32_t idx)
         {
             inst.state = OpState::Running;
         }
-        inst.parked = true;
+        // Stopping must keep advancing until the driver terminates (#13
+        // «Stopping -> Failed, если safe stop не может завершиться»): Yield
+        // from Stopping behaves like Continue - no eternal park, no silent
+        // stall, the slot is never leaked.
+        inst.parked = inst.state != OpState::Stopping;
         break;
 
     case DriverEventKind::Spawn:
@@ -362,7 +366,11 @@ void Runtime::notify_parent(std::uint32_t parent_op_id, const Outcome& o)
     Instance& pinst = m_instances[static_cast<std::uint32_t>(p)];
     pinst.child_terminal = true;
     pinst.child_outcome = o;
-    pinst.parked = false; // wake
+    if (!pinst.pending_terminal)
+    {
+        pinst.parked = false; // wake a live driver; a deferred terminal parent
+                              // stays parked - resolved only by finalize below
+    }
     if (pinst.pending_terminal && !has_active_descendants(pinst.op_id))
     {
         // The last child terminated: resolve the deferred terminal (#13).
@@ -446,6 +454,16 @@ bool Runtime::is_active(std::uint32_t op_id) const
     }
     const OpState s = m_instances[static_cast<std::uint32_t>(idx)].state;
     return s == OpState::Accepted || s == OpState::Running || s == OpState::Stopping;
+}
+
+std::uint16_t Runtime::authority_of(std::uint32_t op_id) const
+{
+    const std::int32_t idx = find(op_id);
+    if (idx < 0)
+    {
+        return 0;
+    }
+    return m_instances[static_cast<std::uint32_t>(idx)].authority_id;
 }
 
 } // namespace runtime

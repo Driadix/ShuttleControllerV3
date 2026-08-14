@@ -71,12 +71,24 @@ TEST(QueueProduction, ServiceAndUpdateCapacities)
     EXPECT_FALSE(q.push(Class::Service, make_frame(1), false));
     EXPECT_EQ(q.rejected(Class::Service), 1u);
 
+    // Update: 2 working (new transactions) + 2 reserve (in-progress, #48 §6).
     for (std::uint32_t i = 0; i < InboundQueue::UpdateCapacity; ++i)
     {
         EXPECT_TRUE(q.push(Class::Update, make_frame(2), false));
     }
+    // New transaction when working is full: rejected (new transactions only).
     EXPECT_FALSE(q.push(Class::Update, make_frame(2), false));
     EXPECT_EQ(q.rejected(Class::Update), 1u);
+    // In-progress frames (reserve) are never rejected by the full working set.
+    EXPECT_TRUE(q.push(Class::Update, make_frame(2), true));
+    EXPECT_TRUE(q.push(Class::Update, make_frame(2), true));
+    EXPECT_FALSE(q.push(Class::Update, make_frame(2), true)); // physically full (2+2)
+    // Reserve drains first.
+    Frame out;
+    ASSERT_TRUE(q.pop(Class::Update, out));
+    ASSERT_TRUE(q.pop(Class::Update, out));
+    ASSERT_TRUE(q.pop(Class::Update, out));
+    EXPECT_EQ(q.rejected(Class::Update), 1u); // reserve exhaustion is not a reject
 }
 
 TEST(QueueProduction, FifoOrderAndObservableCounters)

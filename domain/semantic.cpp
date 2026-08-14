@@ -82,10 +82,11 @@ void SemanticContract::process_frame(const codec::DecodedFrame& f)
         break;
     default:
         // Unknown or not-yet-implemented control messages: drop + event
-        // (no silent acceptance, R5).
+        // (no silent acceptance, R5). The family IS known - the message type
+        // is not (msgType-level error, #47 section 18 #1).
         if (m_events != nullptr)
         {
-            m_events->transport_error(codec::TransportError::UnknownFamily);
+            m_events->transport_error(codec::TransportError::UnknownMessage);
         }
         break;
     }
@@ -328,6 +329,30 @@ void SemanticContract::handle_stop_intent(const codec::DecodedFrame& f)
         }
         return;
     }
+    // #47 section 5.1: mutating traffic - stop intents included - requires a
+    // successful handshake on the link/principal.
+    if (m_grant.authority_id == 0)
+    {
+        if (m_events != nullptr)
+        {
+            m_events->admission_rejected(static_cast<std::uint8_t>(codec::RejectCode::HandshakeRequired));
+        }
+        return;
+    }
+    // Authority binding (#47 §5.1): a principal stops only its own instances.
+    const std::uint16_t owner = m_rt != nullptr ? m_rt->authority_of(s.operation_id) : 0;
+    if (owner == 0)
+    {
+        return; // unknown/completed instance: idempotent no-op (#13)
+    }
+    if (owner != m_grant.authority_id)
+    {
+        if (m_events != nullptr)
+        {
+            m_events->admission_rejected(static_cast<std::uint8_t>(codec::RejectCode::Unauthorized));
+        }
+        return;
+    }
     // Stop is a control intent, idempotent; no ACK required (#13, #47 Q25).
     (void)m_rt->stop(s.operation_id);
 }
@@ -379,6 +404,16 @@ void SemanticContract::handle_subscribe(const codec::DecodedFrame& f)
         }
         return;
     }
+    // #47 section 5.1: subscriptions are principal-scoped agreements; no
+    // handshake -> no principal -> no subscription.
+    if (m_grant.authority_id == 0)
+    {
+        if (m_events != nullptr)
+        {
+            m_events->admission_rejected(static_cast<std::uint8_t>(codec::RejectCode::HandshakeRequired));
+        }
+        return;
+    }
     codec::SubscriptionAck ack;
     std::uint8_t sub_id = 0;
     const subscription::Registry::Result res = m_subs->subscribe(m_grant.authority_id, s, sub_id);
@@ -406,10 +441,22 @@ void SemanticContract::handle_unsubscribe(const codec::DecodedFrame& f)
         }
         return;
     }
+    // #47 section 5.1: no handshake -> no principal -> no subscription.
+    if (m_grant.authority_id == 0)
+    {
+        if (m_events != nullptr)
+        {
+            m_events->admission_rejected(static_cast<std::uint8_t>(codec::RejectCode::HandshakeRequired));
+        }
+        return;
+    }
     codec::SubscriptionAck ack;
     const subscription::Registry::Result res = m_subs->unsubscribe(m_grant.authority_id, u.sub_id);
     ack.sub_id = u.sub_id;
     ack.accepted = res == subscription::Registry::Result::Ok;
+    ack.reject_code = res == subscription::Registry::Result::Ok
+                          ? 0
+                          : static_cast<std::uint8_t>(codec::RejectCode::UnknownSubscription);
     std::uint8_t payload[codec::MaxPayload];
     const std::uint16_t plen = codec::encode_sub_ack(payload, sizeof(payload), ack);
     if (plen > 0)

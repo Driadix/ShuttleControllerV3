@@ -76,6 +76,34 @@ class SemEnv
         sc.process_frame(dr.frame);
     }
 
+    // Sends an arbitrary Control-family frame (payload pre-encoded by the caller).
+    void send_frame(std::uint8_t msg_type, const std::uint8_t* payload, std::uint16_t len)
+    {
+        std::uint8_t frame[v3::codec::Mtu];
+        const std::uint16_t flen = test::make_control_frame(msg_type, payload, len, frame, sizeof(frame));
+        ASSERT_GT(flen, 0u);
+        const DecodeResult dr = v3::codec::decode(frame, flen);
+        ASSERT_TRUE(dr.ok());
+        sc.process_frame(dr.frame);
+    }
+
+    // Sends a StopIntent frame for op_id.
+    void send_stop(std::uint32_t op_id)
+    {
+        std::uint8_t payload[4] = {static_cast<std::uint8_t>(op_id & 0xFFu),
+                                   static_cast<std::uint8_t>((op_id >> 8) & 0xFFu),
+                                   static_cast<std::uint8_t>((op_id >> 16) & 0xFFu),
+                                   static_cast<std::uint8_t>((op_id >> 24) & 0xFFu)};
+        send_frame(static_cast<std::uint8_t>(v3::codec::MsgControl::StopIntent), payload, 4);
+    }
+
+    // Sends a Subscribe frame.
+    void send_subscribe(std::uint8_t class_mask)
+    {
+        std::uint8_t payload[6] = {class_mask, 0, 0x2C, 0x01, 0x80, 0x00}; // 300 ms, 128 B/tick
+        send_frame(static_cast<std::uint8_t>(v3::codec::MsgControl::Subscribe), payload, 6);
+    }
+
     // Decodes the last outbound frame as a positive ACK; returns its op id.
     std::uint32_t last_ack_pos()
     {
@@ -267,6 +295,89 @@ TEST(Semantic, HandshakeRequiredWithoutGrant)
     env.register_type(1);
     env.send(req(1));
     EXPECT_EQ(env.last_reject(), static_cast<std::uint8_t>(RejectCode::HandshakeRequired));
+    EXPECT_EQ(env.events.started_count, 0u);
+}
+
+TEST(Semantic, StopAndSubscribeRequireHandshake)
+{
+    SemEnv env(/*grant_authority*/ 0); // pre-handshake principal
+    env.register_type(1);
+
+    // Stop intent pre-handshake: rejected (HandshakeRequired), no mutation.
+    env.send_stop(123);
+    EXPECT_EQ(env.events.reject_count, 1u);
+    EXPECT_EQ(env.events.rejects[0], static_cast<std::uint8_t>(RejectCode::HandshakeRequired));
+    EXPECT_EQ(env.rt.active_count(), 0u);
+
+    // Subscribe pre-handshake: rejected, no subscription created.
+    env.send_subscribe(v3::codec::ClassBitTelemetry);
+    EXPECT_EQ(env.events.reject_count, 2u);
+    EXPECT_EQ(env.events.rejects[1], static_cast<std::uint8_t>(RejectCode::HandshakeRequired));
+    EXPECT_EQ(env.subs.active_count(), 0u);
+}
+
+TEST(Semantic, StopBoundToOwningPrincipal)
+{
+    SemEnv env;
+    env.register_type(1, false, true, v3::slot::Activity::Motion, 64, test::driver_cancel_on_stop);
+    env.send(req(1));
+    const std::uint32_t op = env.last_ack_pos();
+    EXPECT_EQ(env.rt.authority_of(op), 5u);
+
+    // A stop from ANOTHER principal (authority 6): Unauthorized, no mutation
+    // (authority binding, #47 section 5.1; review MAJOR-2 fix).
+    test::FakeEpoch epoch2;
+    epoch2.set(7);
+    test::FakeWindow window2;
+    test::FakeHealth health2;
+    test::FakeProvisioning prov2;
+    test::RecordingEvents events2;
+    test::RecordingOutbound out2;
+    v3::subscription::Registry subs2;
+    subs2.init(0, &events2);
+    v3::semantic::TypeRegistry types2;
+    v3::semantic::SemanticContract sc2;
+    Grant g2;
+    g2.authority_id = 6;
+    g2.roles = v3::codec::RoleControlClient;
+    sc2.init(&epoch2, &window2, &health2, &prov2, &events2, &out2, &env.rt, &subs2, &types2, g2);
+
+    std::uint8_t payload[4] = {static_cast<std::uint8_t>(op & 0xFFu),
+                               static_cast<std::uint8_t>((op >> 8) & 0xFFu),
+                               static_cast<std::uint8_t>((op >> 16) & 0xFFu),
+                               static_cast<std::uint8_t>((op >> 24) & 0xFFu)};
+    std::uint8_t frame[v3::codec::Mtu];
+    const std::uint16_t flen = test::make_control_frame(
+        static_cast<std::uint8_t>(v3::codec::MsgControl::StopIntent), payload, 4, frame, sizeof(frame));
+    ASSERT_GT(flen, 0u);
+    const DecodeResult dr = v3::codec::decode(frame, flen);
+    ASSERT_TRUE(dr.ok());
+    sc2.process_frame(dr.frame);
+
+    EXPECT_TRUE(env.rt.is_active(op)); // NOT stopped by the foreign principal
+    EXPECT_EQ(events2.reject_count, 1u);
+    EXPECT_EQ(events2.rejects[0], static_cast<std::uint8_t>(RejectCode::Unauthorized));
+
+    // The OWNER principal stops it: silent, idempotent; Cancelled on advance.
+    env.send_stop(op);
+    EXPECT_EQ(env.events.reject_count, 0u); // no rejection on the owner path
+    env.rt.advance(5000);
+    EXPECT_FALSE(env.rt.is_active(op));
+    EXPECT_EQ(env.events.terminal_count, 1u);
+    EXPECT_EQ(env.events.terminal[0].code, 1u); // Cancelled
+}
+
+TEST(Semantic, UnknownControlMessageDroppedWithEvent)
+{
+    SemEnv env;
+    env.register_type(1);
+    // Unknown msgType within the (known) Control family: dropped, msgType-level
+    // error event (#47 section 18 #1), no outbound, no mutation.
+    env.send_frame(0x7F, nullptr, 0);
+    EXPECT_EQ(env.out.count(), 0u);
+    EXPECT_EQ(env.events.error_count, 1u);
+    EXPECT_EQ(env.events.errors[0],
+              static_cast<std::uint8_t>(v3::codec::TransportError::UnknownMessage));
     EXPECT_EQ(env.events.started_count, 0u);
 }
 
