@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "id": "safety-acquire-loopback",
+  "title": "Safety Authority: CAN loopback (internal ACK) - Degraded -> Fault(DegradedTimeout), zero-frame emission, no CAN error",
+  "type": "behavior",
+  "phase": "L4",
+  "identity": {
+    "board": {
+      "part": "STM32F405RG",
+      "uid": "002900363033470336363131"
+    }
+  },
+  "flash": {
+    "required": true,
+    "env": "firmware-loopback"
+  },
+  "readback": {
+    "addr": 536944640,
+    "words": 122,
+    "windowS": 65,
+    "rules": [
+      {
+        "name": "magic",
+        "offset": 0,
+        "kind": "eq",
+        "expect": 1396786737,
+        "note": "0x53414631 'SAF1' - live production SafetyDiag struct"
+      },
+      {
+        "name": "version",
+        "offset": 1,
+        "kind": "eq",
+        "expect": 1,
+        "note": "SafetyDiag struct version (v1)"
+      },
+      {
+        "name": "health_fault",
+        "offset": 4,
+        "kind": "eq",
+        "expect": 3,
+        "note": "health = Fault (3) after T_deg 60s in motion-capable Degraded (CH_F NACK)"
+      },
+      {
+        "name": "fault_degraded_timeout",
+        "offset": 6,
+        "kind": "eq",
+        "expect": 1,
+        "note": "fault = DegradedTimeout (1); loopback ACKs -> no CAN fault overwrites it"
+      },
+      {
+        "name": "can_state_active",
+        "offset": 21,
+        "kind": "eq",
+        "expect": 0,
+        "note": "can_state = Active (0): loopback ACKs internally, no ErrorPassive (key discriminator vs bus leg)"
+      },
+      {
+        "name": "no_force_stops",
+        "offset": 17,
+        "kind": "eq",
+        "expect": 0,
+        "note": "force_stops_issued == 0: no ErrorPassive in loopback -> no FORCE-STOP"
+      },
+      {
+        "name": "t_deg_accumulated",
+        "offset": 10,
+        "kind": "delta",
+        "minDelta": 50000,
+        "note": "degraded_motion_ms low word grew >= 50s: T_deg 60s accumulation honored"
+      },
+      {
+        "name": "stops_issued",
+        "offset": 16,
+        "kind": "delta",
+        "minDelta": 1,
+        "note": "Controlled stop emitted on Fault (Fault at rest -> CONTROLLED, #45 sec 4)"
+      },
+      {
+        "name": "can_tx_count",
+        "offset": 18,
+        "kind": "delta",
+        "minDelta": 1,
+        "note": "zero-frame emission in loopback (frame records verified post-run)"
+      }
+    ]
+  }
+}

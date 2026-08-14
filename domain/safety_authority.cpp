@@ -52,9 +52,9 @@ void SafetyAuthority::init(const Config& cfg, const sensing::SensingView* sensin
     {
         m_diag->magic = kDiagMagic;
         m_diag->version = 1u;
-        m_diag->health = m_health;
-        m_diag->degraded_class = m_degraded_class;
-        m_diag->fault = m_fault;
+        m_diag->health = static_cast<std::uint32_t>(m_health);
+        m_diag->degraded_class = static_cast<std::uint32_t>(m_degraded_class);
+        m_diag->fault = static_cast<std::uint32_t>(m_fault);
     }
 }
 
@@ -350,9 +350,9 @@ void SafetyAuthority::update_diag(std::uint64_t now)
         return;
     }
     m_diag->uptime_ms = now;
-    m_diag->health = m_health;
-    m_diag->degraded_class = m_degraded_class;
-    m_diag->fault = m_fault;
+    m_diag->health = static_cast<std::uint32_t>(m_health);
+    m_diag->degraded_class = static_cast<std::uint32_t>(m_degraded_class);
+    m_diag->fault = static_cast<std::uint32_t>(m_fault);
     m_diag->state_entry_ms = m_state_entry_ms;
     m_diag->degraded_motion_ms = m_deg_motion_ms;
     m_diag->current_intent = m_funnel.current();

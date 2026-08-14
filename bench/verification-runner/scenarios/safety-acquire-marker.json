@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "id": "safety-acquire-marker",
+  "title": "Safety Authority: crash marker (Q5 A) - pre-written marker -> Fault(CrashMarker), power-cycle != acknowledgment",
+  "type": "behavior",
+  "phase": "L4",
+  "identity": {
+    "board": {
+      "part": "STM32F405RG",
+      "uid": "002900363033470336363131"
+    }
+  },
+  "flash": {
+    "required": true,
+    "env": "firmware"
+  },
+  "readback": {
+    "addr": 536944640,
+    "words": 122,
+    "windowS": 5,
+    "rules": [
+      {
+        "name": "magic",
+        "offset": 0,
+        "kind": "eq",
+        "expect": 1396786737,
+        "note": "0x53414631 'SAF1' - live production SafetyDiag struct"
+      },
+      {
+        "name": "version",
+        "offset": 1,
+        "kind": "eq",
+        "expect": 1,
+        "note": "SafetyDiag struct version (v1)"
+      },
+      {
+        "name": "health_fault",
+        "offset": 4,
+        "kind": "eq",
+        "expect": 3,
+        "note": "health = Fault (3): startup with crash marker latches Fault immediately"
+      },
+      {
+        "name": "fault_crash_marker",
+        "offset": 6,
+        "kind": "eq",
+        "expect": 4,
+        "note": "fault = CrashMarker (4): marker read at startup -> Fault (Q5 A); motion inhibited"
+      }
+    ]
+  }
+}

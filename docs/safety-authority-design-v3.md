@@ -236,10 +236,11 @@ struct SafetyDiag {
     std::uint32_t magic;             // 'SAF1'
     std::uint32_t version;           // структуры
     std::uint64_t uptime_ms;         // monotonic
-    // Health
-    SafetyHealth health;             // текущее состояние SA
-    DegradedClass degraded_class;    // активный Degraded-класс (None вне Degraded)
-    SafetyFault fault;               // latched fault (None вне Fault)
+    // Health - word-aligned (32-bit) для L4 readback-парсинга runner'а (schema v2,
+    // правила eq сравнивают целые слова; packed-enum ломал бы разбор).
+    std::uint32_t health;            // SafetyHealth - текущее состояние SA
+    std::uint32_t degraded_class;    // DegradedClass - активный Degraded-класс (None вне Degraded)
+    std::uint32_t fault;             // SafetyFault - latched fault (None вне Fault)
     std::uint64_t state_entry_ms;    // monotonic момент входа в текущее состояние
     std::uint64_t degraded_motion_ms; // накопленное время в motion-capable Degraded
                                       //   (T_deg-отсчёт, #48 §2.2; пауза на информационных
@@ -253,7 +254,7 @@ struct SafetyDiag {
     std::uint32_t can_tx_count;      // кадров TX всего
     std::uint32_t can_tx_dropped;    // бюджет-отказы TX (per-tick)
     std::uint32_t can_rx_dropped;    // RX-переполнения
-    CanErrorState can_state;         // error-state на последней границе
+    std::uint32_t can_state;         // CanErrorState - error-state на последней границе (word-aligned)
     std::uint32_t can_bus_off_recoveries; // успешные re-integration (bus-off recovery)
     // Ring последних кадров (raw timestamps, bounded)
     struct FrameRecord {

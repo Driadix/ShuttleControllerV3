@@ -27,9 +27,11 @@ struct SafetyDiag
     std::uint32_t magic = 0;                 // 'SAF1'
     std::uint32_t version = 1;               // структуры
     std::uint64_t uptime_ms = 0;             // monotonic
-    safety::SafetyHealth health = safety::SafetyHealth::Initializing;
-    safety::DegradedClass degraded_class = safety::DegradedClass::None;
-    safety::SafetyFault fault = safety::SafetyFault::None;
+    // Состояния - word-aligned (32-bit) для L4 readback-парсинга runner'а
+    // (правила eq сравнивают целые слова; packed-enum ломал бы разбор).
+    std::uint32_t health = 0;                // SafetyHealth
+    std::uint32_t degraded_class = 0;        // DegradedClass
+    std::uint32_t fault = 0;                 // SafetyFault (None вне Fault, §2.5)
     std::uint64_t state_entry_ms = 0;        // monotonic момент входа в текущее состояние
     std::uint64_t degraded_motion_ms = 0;    // накопленное время в motion-capable Degraded
                                              //   (T_deg-отсчёт, #48 §2.2)
@@ -41,7 +43,7 @@ struct SafetyDiag
     std::uint32_t can_tx_count = 0;
     std::uint32_t can_tx_dropped = 0;
     std::uint32_t can_rx_dropped = 0;
-    CanErrorState can_state = CanErrorState::Active;
+    std::uint32_t can_state = 0;             // CanErrorState
     std::uint32_t can_bus_off_recoveries = 0;
 
     // Ring последних кадров (raw timestamps, bounded). kind: 0=100/101, 1=zero, 2=force-stop.

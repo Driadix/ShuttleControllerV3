@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "signed": true,
+  "owner": "Driadix",
+  "at": "2026-08-14T08:02:43+00:00",
+  "items": [
+    {
+      "id": "probe",
+      "text": "ST-Link V2 подключен на XT21 (SWD), питание платы подано (probe PASS 2026-08-14)",
+      "confirmed": true
+    },
+    {
+      "id": "sensors",
+      "text": "ToF 0x09/0x0C + AS5600 на местах по bench record #73; CH_F 0x0A NACK - штатно (дает Degraded)",
+      "confirmed": true
+    },
+    {
+      "id": "can",
+      "text": "CAN-пин PB8/PB9 на плате; CAN-оборудования нет (#62) - леги loopback/no-peer",
+      "confirmed": true
+    },
+    {
+      "id": "power",
+      "text": "Питание включено; 3.3V~3.3, 5V~5 (gate); нет нагрева/запаха/дыма; правило аварийной остановки принято",
+      "confirmed": true
+    },
+    {
+      "id": "l4",
+      "text": "Владелец явно одобрил исполнение L4 (safety-acquire-bus/loopback/marker, production firmware flash)",
+      "confirmed": true
+    }
+  ]
+}

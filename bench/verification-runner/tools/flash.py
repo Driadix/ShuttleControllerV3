@@ -21,7 +21,9 @@ OBJCOPY = os.path.join(
     "arm-none-eabi-objcopy.exe",
 )
 FLASH_BASE = 0x08000000
-RAM_SECTION = ".bram_sensing"
+# Pinned runtime-RAM diagnostic sections (loadable in the ELF; stripped from the
+# flash image - a loadable RAM segment makes the standard upload verify fail).
+RAM_SECTIONS = [".bram_sensing", ".bram_safety"]
 
 
 def flash_firmware(env: str = "firmware", timeout_s: int = 600) -> dict:
@@ -38,8 +40,10 @@ def flash_firmware(env: str = "firmware", timeout_s: int = 600) -> dict:
 
     elf = REPO_ROOT / ".pio" / "build" / env / "firmware.elf"
     out = REPO_ROOT / ".pio" / "build" / env / "firmware-flash.bin"
-    args = [OBJCOPY, "-O", "binary", "--remove-section", RAM_SECTION,
-            str(elf), str(out)]
+    args = [OBJCOPY, "-O", "binary"]
+    for sec in RAM_SECTIONS:
+        args += ["--remove-section", sec]
+    args += [str(elf), str(out)]
     r2 = subprocess.run(args, capture_output=True, text=True,
                         timeout=timeout_s, cwd=REPO_ROOT)
     if r2.returncode != 0 or not out.exists():
@@ -49,6 +53,9 @@ def flash_firmware(env: str = "firmware", timeout_s: int = 600) -> dict:
     cmds = ["init; reset halt",
             "program %s 0x%X verify" % (out.as_posix(), FLASH_BASE),
             "mww 0x20011000 0x0",  # stale .bram_sensing marker must not read
+            # Clear the whole .bram_safety diag (122 words): stale counters/ring must
+            # not read (L4 eq/delta rules). `fill` is unavailable in this OpenOCD build.
+            "; ".join("mww 0x%X 0x0" % (0x20012000 + 4 * i) for i in range(122)),
             "reset run",
             "shutdown"]
     cfg = [OPENOCD, "-f", "interface/stlink.cfg", "-f", "target/stm32f4x.cfg"]

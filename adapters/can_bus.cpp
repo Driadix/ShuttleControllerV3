@@ -83,7 +83,7 @@ void CanBus::init(bool loopback, SafetyDiag* diag)
     (void)can_init(loopback);
     if (m_diag != nullptr)
     {
-        m_diag->can_state = error_state();
+        m_diag->can_state = static_cast<std::uint32_t>(error_state());
     }
 }
 
@@ -239,7 +239,7 @@ void CanBus::recover_bus_off()
     if (m_diag != nullptr)
     {
         ++m_diag->can_bus_off_recoveries;
-        m_diag->can_state = error_state();
+        m_diag->can_state = static_cast<std::uint32_t>(error_state());
     }
 }
 
