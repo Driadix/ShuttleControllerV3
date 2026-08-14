@@ -402,10 +402,9 @@ actuation_step(ctx):               # platform/actuation_schedule.cpp; armed то
       next_tx_gate_ms = now + ControlTxGateMs
       if intent.kind == VelocitySetpoint or intent.kind == Lift:
           frame = build_actuator_frame(intent)      # 100/101 (контракт §4.3)
-          if not can->tx(frame): diag.can_tx_dropped++
-          record_frame(frame, kind=0)
+          if can->tx(frame): record_frame(frame, kind=0)  # drop/статистика - адаптер
       else:  # Stop / ForceStop intent: нулевой кадр (#45 §4 «нулевой кадр в следующую эмиссию»)
-          zero = zero_frame(); can->tx(zero); record_frame(zero, kind=1)
+          zero = zero_frame(); if can->tx(zero): record_frame(zero, kind=1)
   # перевооружение от СВЕЖЕГО now (паттерн #63 §6: длинный шаг не старит дедлайн):
   now2 = monotonic::now_ms()
   deadline = uint32(now2) + EmissionStepMs (10 ms)
@@ -697,8 +696,8 @@ void SafetyAuthority::tick(std::uint64_t now)
     //    каждая граница шага, прямо из слота, вне FIFO (INV-FORCE-STOP-CHANNEL)
     if (m_funnel.current().kind == IntentKind::ForceStop
         || m_funnel.current().stop_profile == StopProfile::ForceStop) {
-        m_can->force_stop_tx();                // min-ID mailbox (0x1), выделенный, вне очередей
-        record_frame(kForceStop, now);
+        m_can->force_stop_tx();                // min-ID mailbox (0x1), выделенный, вне очередей;
+        ++m_diag->force_stops_issued;          //   frame-запись (kind 2) - CAN-адаптер
     }
 }
 
