@@ -463,6 +463,7 @@ TEST(Observability, T8_PriorityOrder)
 
 // ---------------------------------------------------------------------------
 // T9: Query answer - document <= 456 B, <= 4 fragments, fencing
+// (version + controller_epoch header ALWAYS precedes, design §2.3)
 // ---------------------------------------------------------------------------
 TEST(Observability, T9_QueryAnswerFragments)
 {
@@ -472,9 +473,12 @@ TEST(Observability, T9_QueryAnswerFragments)
     env.producer.answer_query(0xFF);
     env.tick();
 
-    // Count snapshot fragments on the wire.
+    // Count snapshot fragments on the wire and decode the document header.
     std::uint32_t fragments = 0;
     std::uint32_t total_doc = 0;
+    std::uint32_t doc_version = 0;
+    std::uint32_t doc_epoch = 0;
+    bool header_seen = false;
     const std::uint8_t* b = env.uart.bytes();
     const std::uint32_t n = env.uart.used();
     for (std::uint32_t i = 0; i + 12 <= n; ++i)
@@ -486,6 +490,22 @@ TEST(Observability, T9_QueryAnswerFragments)
             if (b[i + 4] == static_cast<std::uint8_t>(v3::codec::MsgObservability::SnapshotFragment))
             {
                 ++fragments;
+                // payload = fragmentIndex u8 + fragmentCount u8 + chunk[].
+                // chunk starts with the document header (version u32 + epoch
+                // u32, LE) - decode on the first fragment only.
+                const std::uint32_t chunk_start = i + 12; // sync2 + header8 + frag idx/count
+                if (!header_seen && plen >= 10u && b[i + 10] == 0u) // fragmentIndex 0
+                {
+                    doc_version = static_cast<std::uint32_t>(b[chunk_start]) |
+                                  (static_cast<std::uint32_t>(b[chunk_start + 1]) << 8) |
+                                  (static_cast<std::uint32_t>(b[chunk_start + 2]) << 16) |
+                                  (static_cast<std::uint32_t>(b[chunk_start + 3]) << 24);
+                    doc_epoch = static_cast<std::uint32_t>(b[chunk_start + 4]) |
+                                (static_cast<std::uint32_t>(b[chunk_start + 5]) << 8) |
+                                (static_cast<std::uint32_t>(b[chunk_start + 6]) << 16) |
+                                (static_cast<std::uint32_t>(b[chunk_start + 7]) << 24);
+                    header_seen = true;
+                }
                 total_doc += plen - 2; // minus fragmentIndex/Count
             }
             i += 11 + plen;
@@ -494,6 +514,11 @@ TEST(Observability, T9_QueryAnswerFragments)
     EXPECT_GE(fragments, 1u);
     EXPECT_LE(fragments, 4u);
     EXPECT_LE(total_doc, 456u);
+    // Fencing header (design §2.3): version >= 1 and controller_epoch = 1
+    // (FakeEpoch). A client discards documents with stale version.
+    EXPECT_TRUE(header_seen);
+    EXPECT_GE(doc_version, 1u);
+    EXPECT_EQ(doc_epoch, 1u);
 }
 
 // T9b: Sink intercepts a Query frame routed via OutboundControl (semantic

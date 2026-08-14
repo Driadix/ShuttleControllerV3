@@ -574,10 +574,15 @@ void Producer::assemble_snapshot(std::uint8_t sections_mask, std::uint8_t* out,
     };
 
     ++m_doc_version;
+    // Document header: version + controller_epoch ALWAYS precede, independent
+    // of sections_mask (design §2.3 fencing: stale documents are discarded by
+    // version, epoch fences reboots; AWS Shadow pattern).
+    put32(m_doc_version);
+    put32(m_epoch != nullptr ? m_epoch->epoch() : 0u);
     // Sections are selected by sections_mask (design §2.3/§3.2): base (0x01),
     // gates (0x02), identity (0x04), ops (0x08), sensing (0x10), actuator (0x20),
-    // masks (0x40), counters (0x80). 0xFF = all. Header (version+epoch) always
-    // precedes; sections absent from the mask are skipped (bounded doc).
+    // masks (0x40), counters (0x80). 0xFF = all. Sections absent from the mask
+    // are skipped (bounded doc).
     const bool want_base = (sections_mask & 0x01) != 0;
     const bool want_gates = (sections_mask & 0x02) != 0;
     const bool want_identity = (sections_mask & 0x04) != 0;
@@ -848,11 +853,14 @@ void Producer::push_birth(std::uint16_t authority_id)
 
 void Producer::update_uptime(std::uint32_t now_ms)
 {
-    // sysUpTime (#49 section 6): advance once per second edge, never per tick.
+    // sysUpTime (#49 section 6): seconds since boot, advanced once per second
+    // edge, never per tick. Increments on edge TRANSITIONS (s != last), not by
+    // copying s: stays monotonic across a 2^32 ms wrap of the monotonic clock
+    // (~49.7 days, review NIT).
     const std::uint32_t s = now_ms / 1000u;
-    if (s > m_last_uptime_s)
+    if (s != m_last_uptime_s)
     {
-        m_counters.uptime_s = s;
+        ++m_counters.uptime_s;
         m_last_uptime_s = s;
     }
 }
