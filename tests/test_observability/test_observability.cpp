@@ -587,19 +587,37 @@ TEST(Observability, T11_FaultCaptureSupersede)
     env.subscribe_mask(0x08); // traces
     env.set_now(1);
 
-    env.producer.crash_marker_pending(3);
-    env.tick();
-    EXPECT_GT(env.uart.tx_calls(), 0u); // trace fragments emitted
+    env.producer.crash_marker_pending(3); // latch #1: fragments queued (traces)
+    // tx happens only in Sink::tick (defer-on-backpressure); fragments are in
+    // the Traces queue now. Capture ~514 B / 114 B chunk = 5 fragments, and
+    // the per-tick Traces cap is 128 B -> several ticks drain it fully.
 
-    // Second capture AFTER delivery: the previous capture is delivered
-    // (pending cleared synchronously) - NOT a supersede (design §3.3:
-    // supersede counts only while a capture is still being assembled/
-    // delivered). The new capture is emitted normally.
-    const std::uint32_t before = env.producer.counters().trace_capture_superseded;
+    // Latch #2 BEFORE the traces queue drains: the first capture is still
+    // pending (enqueue is not delivery; per-tick cap 128 B, capture spans
+    // several ticks) -> supersede + counter (design §3.3).
     env.set_now(2);
     env.producer.crash_marker_pending(4);
-    env.tick();
+    EXPECT_GE(env.producer.counters().trace_capture_superseded, 1u);
+
+    // Drain until the Traces queue is empty (cap 128 B/tick: ~5 ticks). The
+    // fake UART ring accumulates like the real TXE ISR drains it - consume
+    // between ticks so tx_bytes_available() stays open.
+    for (int i = 0; i < 8; ++i)
+    {
+        env.set_now(static_cast<std::uint32_t>(10 + i));
+        env.tick();
+        env.uart.drain(env.uart.used()); // wire consumed (ISR analog)
+    }
+    EXPECT_GT(env.uart.tx_calls(), 0u); // fragments reached the wire
+
+    // Latch #3 AFTER delivery: pending cleared by Sink (traces drained) ->
+    // fresh capture, not a supersede.
+    const std::uint32_t before = env.producer.counters().trace_capture_superseded;
+    env.set_now(20);
+    env.producer.crash_marker_pending(5);
     EXPECT_EQ(env.producer.counters().trace_capture_superseded, before);
+    env.tick();
+    EXPECT_GT(env.uart.tx_calls(), 0u); // new capture fragments emitted
 }
 
 // T11b: auto-clear fault (DegradedTimeout) does NOT latch a capture (#49 8.2).

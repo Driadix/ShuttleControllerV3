@@ -57,6 +57,14 @@ template <typename T, std::size_t N> class StaticQueue
     size_type size() const { return m_size; }
     constexpr size_type capacity() const { return N; }
 
+    // Drops all elements (fault-capture supersede: old fragments are obsolete
+    // and must not interleave with the new capture on the wire).
+    void clear()
+    {
+        m_head = 0;
+        m_size = 0;
+    }
+
     // Overflow counter - observable by the measurement recorder (obligation #7).
     std::uint32_t overflow_count() const { return m_overflow; }
     void reset_overflow() { m_overflow = 0; }

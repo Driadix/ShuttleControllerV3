@@ -145,6 +145,11 @@ class Producer : public KernelEvents, public RuntimeEvents,
     void update_uptime(std::uint32_t now_ms);
     std::uint32_t uptime_s() const { return m_counters.uptime_s; }
 
+    // Called by the Sink when a fault capture's trace fragments have fully
+    // drained (design §3.3): clears the pending latch so the next crash-class
+    // fault starts a fresh capture instead of superseding.
+    void on_capture_delivered();
+
   private:
     void emit_event(std::uint16_t event_id, std::uint8_t severity, std::uint8_t ctx_kind,
                     std::uint32_t ctx_value, std::uint32_t ctx_value2);
@@ -226,6 +231,12 @@ class Sink : public OutboundControl
     std::uint32_t tail_logs(std::uint8_t* out, std::uint32_t cap) const;
     // Events-queue capacity probe for the coalesced drop-event flush (Producer).
     bool events_full() const { return m_events.full(); }
+    // Called by the Producer after enqueueing a fault capture: the Sink tracks
+    // the delivery window and reports drain completion (on_capture_delivered).
+    void note_capture_pending() { m_capture_pending_flag = true; }
+    // Fault-capture supersede (design §3.3): drop the still-queued fragments of
+    // the superseded capture so they never interleave with the new capture.
+    void drop_pending_capture() { m_traces.clear(); }
 
   private:
     struct QueueEntry
@@ -255,6 +266,9 @@ class Sink : public OutboundControl
     slice::StaticQueue<QueueEntry, EventsCapacity> m_events;
     slice::StaticQueue<QueueEntry, LogsCapacity> m_logs;
     slice::StaticQueue<QueueEntry, TracesCapacity> m_traces;
+    // True between a fault-capture enqueue and the Traces queue fully draining
+    // (Sink::tick clears it and calls Producer::on_capture_delivered).
+    bool m_capture_pending_flag = false;
 
     // Fault-capture tail mirrors (compact: events 26 B, logs 32 B; design 2.2).
     static constexpr std::uint32_t TailDepth = 8;

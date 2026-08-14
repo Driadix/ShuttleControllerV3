@@ -462,11 +462,19 @@ void Producer::start_fault_capture(std::uint16_t trigger_event_id, std::uint32_t
     {
         return;
     }
+    // A capture is pending while its trace fragments are still queued (not yet
+    // drained to the UART - per-tick cap 128 B, a ~489 B capture spans several
+    // ticks). A second crash-class latch in that window supersedes the old
+    // capture (design §3.3, #49 §8.2): the old staging is obsolete, its
+    // fragments would interleave with the new ones. Enqueue is NOT delivery -
+    // the flag clears only via Sink::on_capture_delivered (traces drained).
     if (m_capture_pending)
     {
         ++m_counters.trace_capture_superseded;
         emit_event(kEvTraceCaptureSuperseded, kSevWarning, 0, 0, 0);
-        // new capture supersedes the old: rebuild from current state
+        // Drop the superseded capture's still-queued fragments (design §3.3):
+        // they are obsolete and must not interleave with the new capture.
+        m_sink->drop_pending_capture();
     }
 
     std::uint16_t n = 0;
@@ -517,10 +525,9 @@ void Producer::start_fault_capture(std::uint16_t trigger_event_id, std::uint32_t
     n = static_cast<std::uint16_t>(n + lg);
 
     m_staging_len = n;
-    // Pending flag guards the staging buffer while fragments are being
-    // delivered; delivery is synchronous (fragments enqueued below), so the
-    // flag clears right after - a supersede only counts while a capture is
-    // still being assembled/delivered (design §3.3).
+    // Pending stays TRUE until the capture fragments have actually drained to
+    // the UART (Sink::on_capture_delivered clears it): a second latch before
+    // that point supersedes this capture (design §3.3). Enqueue is not delivery.
     m_capture_pending = true;
 
     // Deliver as fragmented traces records (design 3.3): the capture stream =
@@ -529,7 +536,16 @@ void Producer::start_fault_capture(std::uint16_t trigger_event_id, std::uint32_t
     // canonical frame family=Observability msg_type=TraceRecord queue_class=Traces.
     // Per-tick cap 128 B drains at most one fragment per tick (several ticks).
     send_trace_capture(trigger_event_id, trigger_tick, m_staging, m_staging_len);
-    m_capture_pending = false; // delivered (enqueued); staging reusable
+    // m_capture_pending remains true; the Sink reports drain completion.
+    m_sink->note_capture_pending();
+}
+
+void Producer::on_capture_delivered()
+{
+    // Called by the Sink when the Traces queue has drained empty after a
+    // capture: the capture is fully on the wire; a future latch is a fresh
+    // capture, not a supersede (design §3.3).
+    m_capture_pending = false;
 }
 
 // --- Snapshot ---------------------------------------------------------------
@@ -1149,6 +1165,15 @@ void Sink::tick()
     drain(m_logs, spent_logs, codec::QueueClass::Logs, PerClassCapBytes);
     // Priority 4: traces.
     drain(m_traces, spent_traces, codec::QueueClass::Traces, PerClassCapBytes);
+    // Capture delivery completion (design §3.3): once the Traces queue is
+    // fully drained after a fault capture, the Producer clears its pending
+    // latch - a second fault before this point supersedes the capture
+    // (enqueue is not delivery; the capture spans several ticks).
+    if (m_capture_pending_flag && m_traces.empty())
+    {
+        m_capture_pending_flag = false;
+        m_producer->on_capture_delivered();
+    }
     // Priority 5: telemetry.
     drain(m_telemetry, spent_telemetry, codec::QueueClass::Telemetry, PerClassCapBytes);
 
