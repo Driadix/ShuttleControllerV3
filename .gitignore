@@ -28,3 +28,5 @@ out/
 
 # Windows reserved device name, created by `> nul` redirections in Git Bash
 nul
+
+.cache/
