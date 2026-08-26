@@ -52,13 +52,14 @@ struct LogRecord {
 };
 
 // §2.5 TraceRecord
+// NOTE: Simplified context fragment (256B) vs 512B staging area per design doc
 struct TraceRecord {
     Envelope env;
     uint32_t wallTime;
     TimeValidity timeValidity;
     uint8_t kind; // fault_capture, dev_timeline
     // Контекст захвата фолта (staging 512B)
-    std::array<uint8_t, 256> context_fragment; // Упрощено для примера
+    std::array<uint8_t, 256> context_fragment; // Упрощено: 256B вместо 512B из дизайна
 };
 
 } // namespace v3::observability

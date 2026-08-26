@@ -1,9 +1,13 @@
 #pragma once
+// NOTE: Parallel implementation to domain/observability.{h,cpp}. Not wired into PIO build.
+// Divergences from docs/observability-design-v3.md (#72):
+//   - T7: per-class caps + 230B total budget; this uses flat 128B/tick across all classes
+//   - T8: no Control/Service priority classes (only Telemetry/Events/Logs/Traces)
+//   - Wire format: raw struct reinterpret_cast vs envelope-encoded 10/14B layouts
 #include "v3/observability/producer.h"
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
-
 namespace v3::observability {
 
 class Transport {

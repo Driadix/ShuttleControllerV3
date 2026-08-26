@@ -1,9 +1,13 @@
 // UARTSink drain-loop tests (ticket #72 follow-up: приоритетный цикл drain
 // в UARTSink::processTick): порядок классов Events -> Logs -> Traces ->
 // Telemetry, бюджет тика 128 Б, фрагментация Traces между тиками,
-// defer-on-backpressure при занятом транспорте. Плоские предшественники
-// (tests/test_observability_integration.cpp и др.) перенесены под googletest
-// по конвенции issue #51 section 8.
+// defer-on-backpressure при занятом транспорте.
+//
+// NOTE: This is a new parallel implementation (not wired into PIO build yet).
+// Divergences from docs/observability-design-v3.md:
+//   - T7 spec: per-class caps + 230B total budget; this impl uses flat 128B/tick
+//   - T8 spec: no Control/Service priority class (only Telemetry/Events/Logs/Traces)
+//   - Wire format: simplified reinterpret_cast of raw structs vs envelope-encoded 10/14B layouts
 #include "v3/observability/producer.h"
 #include "v3/observability/sink.h"
 #include <gtest/gtest.h>
