@@ -1,3 +1,4 @@
+**Note**: Parallel experimental implementation (`include/v3/observability/*`) considered but rejected per owner decision 2026-08-26. See issue #72 comment for rationale. Canonical stack remains `domain/observability.{h,cpp}` as documented herein.
 # Дизайн observability и UART sink V3 (Observability Producer + Sink)
 
 Статус: **design-артефакт для тикета [«Реализовать observability и UART sink»](https://github.com/Driadix/ShuttleControllerV3/issues/72)** (Фаза 2, один vertical PR по правилу карты [«Реализовать и выпустить firmware-платформу контроллера V3»](https://github.com/Driadix/ShuttleControllerV3/issues/58)).
