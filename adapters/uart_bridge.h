@@ -32,6 +32,10 @@ class UartBridge : public UartPort
     // (the TXE ISR drains); kept for the host ring simulation tests.
     void service();
 
+    // Strong USART1_IRQHandler (vector claim) calls this; public static
+    // because the extern "C" trampoline lives outside the class.
+    static void isr_dispatch();
+
   private:
     static void uart1_isr(); // target ISR: ring->TDR move only (rule R2)
     static UartBridge* s_self; // single-instance trampoline for the ISR

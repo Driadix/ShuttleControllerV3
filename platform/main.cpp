@@ -187,10 +187,13 @@ void setup()
     g_obs_ctx.subs = &g_subscriptions;
     v3::kernel::schedule(&v3::obsglue::sink_tick, &g_obs_ctx,
                          static_cast<std::uint32_t>(v3::monotonic::now_ms() + 1));
+    // In-window registration (now+1): the kernel window is [now, now+T_step
+    // 10 ms] and a now+300 deadline is rejected (DeadlineOutOfWindow) - the
+    // step would never start. Cadence 300 ms is gated inside the steps.
     v3::kernel::schedule(&v3::obsglue::telemetry_tick, &g_obs_ctx,
-                         static_cast<std::uint32_t>(v3::monotonic::now_ms() + 300));
+                         static_cast<std::uint32_t>(v3::monotonic::now_ms() + 1));
     v3::kernel::schedule(&v3::obsglue::birth_check, &g_obs_ctx,
-                         static_cast<std::uint32_t>(v3::monotonic::now_ms() + 300));
+                         static_cast<std::uint32_t>(v3::monotonic::now_ms() + 1));
 }
 
 void loop()

@@ -37,6 +37,11 @@ void UartBridge::uart1_isr()
     }
 }
 
+void UartBridge::isr_dispatch()
+{
+    uart1_isr(); // single instance: static trampoline into the member path
+}
+
 void UartBridge::init()
 {
     s_self = this;
@@ -45,8 +50,13 @@ void UartBridge::init()
     m_txe_enabled = false;
 
     // USART1 on PA9 (TX) / PA10 (RX), 230400 8E1 (V1 display path, XT22).
-    // The STM32duino core maps Serial1 to USART1; we drive the USART directly
-    // for full control over never-block and the ring (owner decision #72 §0.1).
+    // We drive the USART directly, NOT through the Arduino Serial1/HAL_UART
+    // stack (owner decision #72 0.1: own driver for full never-block/ring
+    // control). The core's USART1_IRQHandler dispatches to
+    // HAL_UART_IRQHandler(uart_handlers[UART1_INDEX]) which is NULL unless
+    // Serial1.begin() ran - so the core Serial layer is compiled out
+    // (-D HAL_UART_MODULE_ONLY in platformio.ini) and the strong symbol
+    // below claims the (weak startup) vector slot instead.
     RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
 
@@ -55,18 +65,31 @@ void UartBridge::init()
     GPIOA->AFR[1] = (GPIOA->AFR[1] & ~(0xFu << 4)) | (7u << 4);  // PA9 AF7 = USART1
     GPIOA->AFR[1] = (GPIOA->AFR[1] & ~(0xFu << 8)) | (7u << 8);  // PA10 AF7 = USART1
 
-    // 230400 8E1: oversampling 16, BRR = fck / baud = 168e6 / 230400 = 729.17
-    // => use OVER8=0 (16x) with BRR 729; error < 0.1% (729 * 230400 ~ 168.0 MHz).
+    // 230400 8E1, oversampling 16: USART1 is on APB2; SYSCLK 168 MHz with
+    // PPRE2 /2 gives PCLK2 = 84 MHz (measured RCC_CFGR 0x940A on the bench,
+    // L4 observability-uart leg 2026-09-01). BRR = 84e6 / 230400 = 364.58
+    // => 365 (0.11% error). 8 data bits + even parity needs M=1: with
+    // PCE=1 the word length bits (M=1) carry 8 data + 1 parity = 9-bit frame.
     USART1->CR1 = 0;                        // reset
-    USART1->BRR = 729;
-    USART1->CR1 = USART_CR1_UE | USART_CR1_TE; // enable, TX only (RX off in #72)
-    USART1->CR2 = USART_CR2_STOP_1;         // 1 stop bit + parity even (8E1:
-                                            //   CR1 PCE=1 + PS=0 gives 8E1)
-    USART1->CR1 |= USART_CR1_PCE;
+    USART1->BRR = 365;
+    USART1->CR1 = USART_CR1_UE | USART_CR1_M | USART_CR1_TE;
+    USART1->CR2 = USART_CR2_STOP_1;         // 1 stop bit (8E1: 8 data + even parity + 1 stop)
+    USART1->CR1 |= USART_CR1_PCE;           // parity even (PS=0)
 
     NVIC_SetPriority(USART1_IRQn, 2); // below TIM2 (0) - no inversion
     NVIC_EnableIRQ(USART1_IRQn);
 }
+
+// Strong symbol: claims the weak startup slot for USART1. The core
+// uart.c handler (HAL dispatch with a NULL uart_handlers[] entry) is
+// compiled out by -D HAL_UART_MODULE_ONLY; without it the first TXE
+// interrupt faulted to HardFault (L4 evidence 2026-09-01: PC in
+// HAL_UART_IRQHandler, CFSR 0x8200, 0 bytes on the line).
+extern "C" void USART1_IRQHandler(void)
+{
+    v3::UartBridge::isr_dispatch();
+}
+
 
 std::uint32_t UartBridge::tx_bytes_available() const
 {
