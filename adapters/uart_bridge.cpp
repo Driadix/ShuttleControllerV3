@@ -73,7 +73,7 @@ void UartBridge::init()
     USART1->CR1 = 0;                        // reset
     USART1->BRR = 365;
     USART1->CR1 = USART_CR1_UE | USART_CR1_M | USART_CR1_TE;
-    USART1->CR2 = USART_CR2_STOP_1;         // 1 stop bit
+    USART1->CR2 = USART_CR2_STOP_1;         // 1 stop bit (8E1: 8 data + even parity + 1 stop)
     USART1->CR1 |= USART_CR1_PCE;           // parity even (PS=0)
 
     NVIC_SetPriority(USART1_IRQn, 2); // below TIM2 (0) - no inversion

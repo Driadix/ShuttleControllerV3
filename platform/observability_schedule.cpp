@@ -26,12 +26,11 @@ constexpr std::uint32_t kBirthCheckMs = 300;       // birth checked on the same 
 // cadence is the step's decision, not the scheduler's.
 void rearm_next_tick(void (*fn)(void*), void* ctx)
 {
-    const std::uint64_t now = monotonic::now_ms();
-    if (kernel::schedule(fn, ctx, static_cast<std::uint32_t>(now + 1)) !=
-        kernel::ScheduleResult::Ok)
-    {
-        (void)kernel::schedule(fn, ctx, static_cast<std::uint32_t>(now + 1));
-    }
+    // now+1 is always inside [now, now + T_step 10 ms] unless the ring is
+    // full; on QueueFull the step's own rearm had no effect and the kernel's
+    // schedule_rejected() is observable (overload), no silent death.
+    (void)kernel::schedule(fn, ctx,
+                           static_cast<std::uint32_t>(monotonic::now_ms() + 1));
 }
 
 } // namespace
