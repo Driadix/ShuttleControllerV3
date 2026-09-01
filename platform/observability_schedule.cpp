@@ -17,14 +17,17 @@ namespace
 constexpr std::uint32_t kTelemetryDefaultMs = 300; // bridge default (#49 section 9)
 constexpr std::uint32_t kBirthCheckMs = 300;       // birth checked on the same cadence
 
-// Re-arms the step with a fresh deadline. Pattern platform/sensing_schedule.h
-// (#63): PRIMARY deadline = now + period (cadence preserved), FALLBACK = now+1
-// only when the primary is rejected (out-of-window after a long step) so the
-// pipeline never dies silently. Every-step steps pass period=1.
-void rearm(void (*fn)(void*), void* ctx, std::uint32_t period_ms)
+// Re-arm helper: the kernel accepts only deadlines inside [now, now + T_step
+// 10 ms] (execution foundation #85: one bounded step per tick, wrap-safe
+// window). A far deadline like now+300 is rejected DeadlineOutOfWindow, so a
+// slow-cadence step re-arms at now+1 EVERY tick and gates its own cadence
+// internally (checked against a fresh monotonic read). This mirrors the
+// sensing-glue fallback pattern (#63) but keeps the period honest: the wire
+// cadence is the step's decision, not the scheduler's.
+void rearm_next_tick(void (*fn)(void*), void* ctx)
 {
     const std::uint64_t now = monotonic::now_ms();
-    if (kernel::schedule(fn, ctx, static_cast<std::uint32_t>(now + period_ms)) !=
+    if (kernel::schedule(fn, ctx, static_cast<std::uint32_t>(now + 1)) !=
         kernel::ScheduleResult::Ok)
     {
         (void)kernel::schedule(fn, ctx, static_cast<std::uint32_t>(now + 1));
@@ -46,25 +49,35 @@ void sink_tick(void* ctx)
     {
         c->producer->update_uptime(static_cast<std::uint32_t>(monotonic::now_ms()));
     }
-    rearm(&sink_tick, ctx, /*period_ms=*/1); // every tick
+    rearm_next_tick(&sink_tick, ctx); // every tick
 }
 
 void telemetry_tick(void* ctx)
 {
+    static std::uint32_t s_last_emit_ms = 0; // wrap-safe modular compare
+    const std::uint32_t now = static_cast<std::uint32_t>(monotonic::now_ms());
     auto* c = static_cast<ObsContext*>(ctx);
-    if (c != nullptr && c->producer != nullptr)
+    if (c != nullptr && c->producer != nullptr &&
+        static_cast<std::int32_t>(now - s_last_emit_ms) >=
+            static_cast<std::int32_t>(kTelemetryDefaultMs))
     {
-        c->producer->set_now(static_cast<std::uint32_t>(monotonic::now_ms()));
+        s_last_emit_ms = now;
+        c->producer->set_now(now);
         c->producer->emit_telemetry(); // interest gate inside (#49 section 9)
     }
-    rearm(&telemetry_tick, ctx, kTelemetryDefaultMs); // bridge default 300 ms
+    rearm_next_tick(&telemetry_tick, ctx);
 }
 
 void birth_check(void* ctx)
 {
+    static std::uint32_t s_last_check_ms = 0; // wrap-safe modular compare
+    const std::uint32_t now = static_cast<std::uint32_t>(monotonic::now_ms());
     auto* c = static_cast<ObsContext*>(ctx);
-    if (c != nullptr && c->subs != nullptr && c->producer != nullptr)
+    if (c != nullptr && c->subs != nullptr && c->producer != nullptr &&
+        static_cast<std::int32_t>(now - s_last_check_ms) >=
+            static_cast<std::int32_t>(kBirthCheckMs))
     {
+        s_last_check_ms = now;
         // Birth push on (re)subscribe (#49 section 2.6): bounded scan of the
         // registry slots (<= BridgeCap 8); push_birth handles birth_sent().
         for (std::uint8_t authority = 1; authority <= 16; ++authority)
@@ -75,7 +88,7 @@ void birth_check(void* ctx)
             }
         }
     }
-    rearm(&birth_check, ctx, kBirthCheckMs); // same cadence as telemetry
+    rearm_next_tick(&birth_check, ctx);
 }
 
 } // namespace obsglue
