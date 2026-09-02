@@ -56,7 +56,7 @@ flowchart LR
 | BridgeAssembler | Transport (adapters-интерфейс, domain-логика) | domain | чистый модуль: байты -> DecodedFrame, resync/gap/счётчики; no-alloc, bounds-checked |
 | Handshake machine | Transport | domain | Hello FSM: версия/профиль/handle/principal/грант; эмитит HelloAck/HandshakeReject каноническими кадрами |
 | Principal registry | Transport (principal-resolution #47 §5.1) | domain | handle -> authorityId + roles; epoch-scoped, no-reassign; 16 слотов |
-| Transport glue (rx_tick / link_tick) | platform (склейка) | self-repeating steps: RX-budget pump -> assembler -> очереди; gap-timer |
+| Transport glue (rx_tick / link_tick) | platform (склейка) | platform | self-repeating steps: RX-budget pump -> assembler -> очереди; gap-timer |
 | uart_bridge RX | Transport HAL | adapters | RXNE ISR: регистр DR -> RX-кольцо, только перемещение байта (R2); ring 128 Б, overflow -> счётчик |
 | Inbound queues | Semantic (#74, не пересматриваются) | domain | assembler кладёт кадры по queue_class + reserve-семантике |
 
