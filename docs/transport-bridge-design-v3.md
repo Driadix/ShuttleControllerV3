@@ -8,13 +8,13 @@
 
 ## §0 Решения владельца (HITL-брифинг, 2026-09-02)
 
-> Раздел заполняется решениями владельца по брифингу §10.4 до реализации;
-> ниже - кандидаты, вынесенные на брифинг.
+Решения подтверждены владельцем (брифинг §10.4, все три рекомендации приняты).
 
-1. **RX/TX split линк-бюджета 230 Б/тик** (#48 §7 «UART bridge RX+TX»): кандидат - **115/115 RX/TX** фиксированный split (половина), с ревизией по L4-измерению. Альтернатива: RX 60 / TX 170 (асимметрия в пользу TX-observability, RX-очередь Control 18×128 Б разряжается 5 тиками - 50 мс на полный буфер при flood).
-2. **Hello payload layout (u8 protoMajor, u8 expectedProfileId, u16 bridgePrincipalHandle, u8 requestedRoles)**: минимальный, без endpointInstanceHint (не участвует в principal-resolution, #47 §5.1 п.8; добавляется аддитивно при появлении надобности).
-3. **HelloAck payload layout (u32 controllerEpoch, u16 authorityId, u8 grantedRoles, u8 effectiveProfileId, u16 capabilities=0)**: advertise-минимум #47 §5.1 без избыточных полей; capabilities - аддитивный резерв.
-4. **Слоты principal-registry**: 16 principals (#48 §6), handle - полный u16-диапазон (2048 значений не резервируются; исчерпание неиспользованных хендлов в epoch - практическая невозможность на 16 principals, contract ограничен authority-бюджетом).
+1. **RX/TX split линк-бюджета 230 Б/тик** (#48 §7 «UART bridge RX+TX»): **115/115 RX/TX** фиксированный split, с ревизией по L4-измерению (§11). Альтернатива 60/170 отвергнута: симметрия проще верифицируется, RX-бэклог Control 18 кадров разряжается 20 тиками (200 мс worst-case flood) - приемлемо для control-plane (safety - CAN, вне UART).
+2. **Hello payload layout (u8 protoMajor, u8 expectedProfileId, u16 bridgePrincipalHandle, u8 requestedRoles)**: минимальный, **без endpointInstanceHint** (не участвует в principal-resolution, #47 §5.1 п.8; добавляется аддитивно при появлении надобности).
+3. **Grant-подача в SemanticContract**: **перегрузка process_frame(frame, grant)** - transport-глUE делает registry.resolve(handle) per frame и передаёт грант; process_frame(frame) остаётся для host-тестов #74. Отвергнут SemanticGrantSource-порт: лишний порт + моки во всех тестах #74.
+4. **HelloAck payload layout (u32 controllerEpoch, u16 authorityId, u8 grantedRoles, u8 effectiveProfileId, u16 capabilities=0)**: advertise-минимум #47 §5.1 без избыточных полей; capabilities - аддитивный резерв.
+5. **Слоты principal-registry**: 16 principals (#48 §6), handle - полный u16-диапазон (исчерпание неиспользованных хендлов в epoch практически невозможно на 16 principals; contract ограничен authority-бюджетом).
 
 ---
 
