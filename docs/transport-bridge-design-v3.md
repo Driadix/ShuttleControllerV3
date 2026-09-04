@@ -318,6 +318,8 @@ domain/transport.h / transport.cpp      - BridgeAssembler, Handshake, PrincipalR
 domain/ports.h                          - + UartRxSource
 platform/transport_glue.h / .cpp        - rx_tick / link_tick (self-repeating)
 adapters/uart_bridge.h / .cpp           - + RX-ring, RXNE-часть ISR, rx_read
+```
+
 ### 5.2 Public API (production-форма)
 
 ```cpp
