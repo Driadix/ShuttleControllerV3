@@ -10,7 +10,7 @@
 
 Решения подтверждены владельцем (брифинг §10.4, все три рекомендации приняты).
 
-1. **RX/TX split линк-бюджета 230 Б/тик** (#48 §7 «UART bridge RX+TX»): владелец утвердил **симметричный принцип split с TX >= MTU**; конкретные числа зафиксированы ревью: **RX 192 Б/вызов rx_tick, TX (LinkBudgetBytes) 192 Б/вызов sink_tick** (both >= MTU 128; combined <= 230 Б на любом 10-мс окне; см. §3.4). Исходный кандидат 115/115 отвергнут ревью: 115 < MTU 128 давало head-of-line stall TX-очереди Sink #72 (кадры 116-128 Б не влезали ни в один вызов) и не покрывал update-throughput. Первичный вариант 60/170 отвергнут ранее: асимметрия хуже верифицируется.
+1. **RX/TX split линк-бюджета** (#48 §7 «UART bridge RX+TX, <= 230 Б/тик»): владелец утвердил **симметричный принцип split с TX >= MTU**; конкретные числа зафиксированы ревью: **RX 192 Б/вызов rx_tick, TX (LinkBudgetBytes) 192 Б/вызов sink_tick** (both >= MTU 128; оба направления порознь <= 230 Б/вызов - бюджет #48 §7 трактуется как per-direction baud-derived: 230400 8E1 = 230 Б/10 мс физического потока в каждом направлении, полудуплексной шины нет, UART RX/TX независимы). Исходный кандидат 115/115 отвергнут ревью: 115 < MTU 128 давало head-of-line stall TX-очереди Sink #72 (кадры 116-128 Б не влезали ни в один вызов) и не покрывал update-throughput. Первичный вариант 60/170 отвергнут ранее: асимметрия хуже верифицируется. Per-direction трактовка зафиксирована здесь явным уточнением чтения #48 §7 (примечание в §3.4); изменение бюджета ниже 230/направление не производится.
 2. **Hello payload layout (u8 protoMajor, u8 expectedProfileId, u16 bridgePrincipalHandle, u8 requestedRoles)**: минимальный, **без endpointInstanceHint** (не участвует в principal-resolution, #47 §5.1 п.8; добавляется аддитивно при появлении надобности).
 3. **Grant-подача в SemanticContract**: **перегрузка process_frame(frame, grant)** - transport-глUE делает registry.resolve(handle) per frame и передаёт грант; process_frame(frame) остаётся для host-тестов #74. Отвергнут SemanticGrantSource-порт: лишний порт + моки во всех тестах #74.
 4. **HelloAck payload layout (u32 controllerEpoch, u16 authorityId, u8 grantedRoles, u8 effectiveProfileId, u16 capabilities=0)**: advertise-минимум #47 §5.1 без избыточных полей; capabilities - аддитивный резерв.
@@ -71,7 +71,7 @@ flowchart LR
 ### 2.1 Wire-контракты (payload-кодеки #75, аддитивные к codec #74)
 
 ```cpp
-// Hello (client -> controller; Handshake family, msgType 0; reserve-класс).
+// Hello (client -> controller; Handshake family, msgType 0; обрабатывается безусловно в handshake-машине, вне очередей).
 #pragma pack(push, 1)
 struct Hello
 {
@@ -107,16 +107,17 @@ struct HandshakeReject
 // codec.h: новый флаг (биты 0x02 свободны; FlagReserve 0x01 занят #74).
 constexpr std::uint8_t FlagPrincipalHandle = 0x02;
 
-// Principal-scoped кадры (Control/Service/Update/Session, исключая Hello):
+// Principal-scoped кадры (mutating Control/Service/Update/Session, исключая Hello и read-only Control):
 // header.flags |= FlagPrincipalHandle;
 // payload[0..1] = bridgePrincipalHandle (LE u16);
 // payload[2..] = собственный payload сообщения.
-// Кадры БЕЗ флага на bridge-ингрессе (кроме Hello) -> HandshakeRequired/InvalidEnvelope
-// (см. §3.2а): #47 §5.1 п.7(e) - principal-scoped frame без handle -> reject.
-```
+// Исключение: read-only Control (Query) - handle не требуется (#74 §3.2: handshake НЕ нужен; #47 §5.1 п.2).
+// Кадры БЕЗ флага на bridge-ингрессе (mutating; кроме Hello/Query) -> HandshakeRequired/InvalidEnvelope
+// (см. §3.1): #47 §5.1 п.7(e) - principal-scoped frame без handle -> reject.
 
 - Hello (Handshake family) - handle в собственном payload (§2.1), флаг не ставится.
 - Observability/Outcome (контроллер -> клиент) - флаг не требуется (исходящие, не principal-scoped ingress).
+- Read-only Control (Query) - флаг не требуется (исключение §3.1, review-файндинг ревью-2 M2): очередь без handle-резолва.
 - Доставка: assembler после codec::decode кадра проверяет `flags & FlagPrincipalHandle`, извлекает handle из payload[0..1], срезает 2 байта из payload view и прикладывает `(DecodedFrame, handle)` к маршрутизации. MTU не меняется: 2 Б от MaxPayload 116 -> effective 114 для principal-scoped payload.
 - Спуфинг: bridge обязан ставить handle (obligation #47 §5.1 п.7(c)); контроллер требует флаг на каждом principal-scoped ingress-кадре - отсутствие флага = reject (по контракту #47 п.7(e) «missing handle on bridge principal-scoped frame -> reject»).
 - **Альтернатива отвергнута**: link-wrapper вокруг canonical frame (E22-стиль) - это отдельный framing для bridge, конфликтующий с T2 «байты идентичны codec»; флаг+payload-преамбула сохраняет единую codec-фразу.
@@ -195,6 +196,9 @@ rx_tick(ctx):                                  # self-repeating, паттерн 
         msgType == Hello -> handshake.on_hello(dr, handle=decode(dr).handle)
         else -> handshake.on_unknown(dr)       # -> HandshakeReject(InvalidEnvelope); НЕ в очереди
       else (Control/Service/Update/Session):
+        if not mutating(dr) and family == Control:        # read-only Control: Query (#74 §3.2)
+          queues.push(class, frame, reserve=flags&FlagReserve)  # handshake НЕ требуется
+          continue                                         # semantic сам гейтит read-only
         if not (dr.flags & FlagPrincipalHandle): -> HandshakeReject(HandshakeRequired)  # §2.1b
         handle = rd16(payload); payload += 2
         principal = registry.resolve(handle)
@@ -204,15 +208,16 @@ rx_tick(ctx):                                  # self-repeating, паттерн 
   re-arm (fresh now + 1)
 ```
 
-- **Вся Handshake-family маршрутизируется в handshake-машину** (non-Hello handshake-кадры -> HandshakeReject(InvalidEnvelope), прототип-паритет): они НИКОГДА не попадают в queue-ветку и не могут занять reserve-слоты мусором (review-файндинг M3).
-- Извлечённый кадр проходит `codec::decode` (#74): unknown family/msgType/oversized -> transport_error, кадр не маршрутизируется (review-файндинг N5).
-- Push-failure в очередь -> `queue_rejected(cls)` событие (RuntimeEvents #74; review-файндинг M5).
+- **Вся Handshake-family маршрутизируется в handshake-машину** (non-Hello handshake-кадры -> HandshakeReject(InvalidEnvelope), прототип-паритет): они НИКОГДА не попадают в queue-ветку и не могут занять reserve-слоты мусором (review-файндинг ревью-1 M3).
+- **Read-only Control (Query) - исключение из handle-требования** (review-файндинг ревью-2 M2): #74 §3.2 фиксирует «Query: read-only, handshake НЕ требуется, гейт окна остаётся»; #47 §5.1 п.2 scopes handle-обязательство на mutating Control/Service/Update/Session. Транспорт маршрутизирует Query в Control-очередь без флага/handle-резолва - pre-handshake снапшот доступен (валидация окна/пейлоада - в semantic #74). Все mutating Control/Service/Update/Session - строго через handle-флаг + resolve.
+- Извлечённый кадр проходит `codec::decode` (#74): unknown family/msgType/oversized -> transport_error, кадр не маршрутизируется (review-файндинг ревью-1 N5).
+- Push-failure в очередь -> `queue_rejected(cls)` событие (RuntimeEvents #74; review-файндинг ревью-1 M5).
 - Маршрутизация - механическая (по header.queue_class + reserve-флагу); semantic admission - в #74, transport не решает. Update-family на network_bridge разрешён (mutating Update только на network_bridge - hard rule #47 §3.2; profile-гвард остаётся в semantic #76).
 - Оба reserve-слота Control (stop) - обязательный маршрут: stop-intents никогда не отклоняются полным буфером (#43 §6).
 
-### 3.1а Экспорт ISR-счётчиков (observability)
+### 3.1а Экспорт ISR-счётчиков и assembler-статистики (observability)
 
-rx_tick в начале каждого вызова читает дельты isr_drops / ore_events (ISR-side переменные), и при ненулевой дельте эмитит transport_error-класс событие через RuntimeEvents (0x05xx, Producer #72). Из ISR - только инкремент переменных (R2). Это закрывает #43 §6 «каждый drop => счётчик + событие» для RX-переполнений (review-файндинг M4).
+rx_tick в начале каждого вызова читает дельты isr_drops / ore_events (ISR-side переменные), а после `assembler.drain()` - дельты assembler.stats (bad_crc, truncated_flushes, dropped_bytes, resyncs; счётчик-объект, сравнение с последним экспортом), и при ненулевой дельте эмитит transport_error-класс событие через RuntimeEvents (0x05xx, Producer #72). Из ISR - только инкремент переменных (R2). Это закрывает #43 §6 «каждый drop => счётчик + событие» для RX-переполнений И ассемблерных дропов (кадры с BadCrc assembler отбрасывает до codec::decode - ветка «dr not ok» для них не срабатывает; review-файндинги ревью-1 M4 / ревью-2 M6). Snapshot-delta экспорт не деградирует при отсутствии дропов: нулевые дельты не эмитятся.
 
 ### 3.2 Handshake FSM (Hello -> HelloAck | HandshakeReject)
 
@@ -247,11 +252,13 @@ link_tick(ctx):
 
 | Путь | Бюджет | Основание |
 | --- | --- | --- |
-| RX ring -> assembler | **192 Б/вызов** rx_tick (~9 мс каденция => ~21.3 КБ/с средняя) | <= 207 Б max-gap притока (§2.4); укладывается в 230 Б/T_step |
-| TX (Sink drain, #72) | **LinkBudgetBytes: 230 -> 192 Б/вызов** (sum с RX по T_step <= 230: RX 192/9 мс + TX 192/10 мс = 21.3 + 19.2 = 40.5 КБ/с < 46.1 gross; фактически линии до 23.04 КБ/с каждая в пределе, combined не превышает линию 230 Б/T_step на любом 10-мс окне) | #48 §7 «230 Б/тик RX+TX»; split пересмотрен с 115/115 (см. §0.1) |
-| Sink head-of-line | **192 Б >= MTU 128**: любой одиночный кадр влезает в бюджет вызова - DEFER-правило #72 (observability.cpp drain: `need > budget -> break`) не залипает | review-файндинг B2: 115 < 128 давало перманентный stall головы |
+| RX ring -> assembler | **192 Б/вызов** rx_tick (~9 мс каденция => ~21.3 КБ/с средняя) | <= 207 Б max-gap притока (§2.4); 192 <= 230 Б/вызов - направление RX укладывается в baud-derived бюджет #48 §7 |
+| TX (Sink drain, #72) | **LinkBudgetBytes: 230 -> 192 Б/вызов** | 192 <= 230 Б/вызов - направление TX укладывается в baud-derived бюджет #48 §7; split пересмотрен с 115/115 (см. §0.1) |
+| Sink head-of-line | **192 Б >= MTU 128**: любой одиночный кадр влезает в бюджет вызова - DEFER-правило #72 (observability.cpp drain: `need > budget -> break`) не залипает | review-файндинг ревью-1 B2: 115 < 128 давало перманентный stall головы |
 | Assembler.parse за вызов | <= 4 кадров (192 Б / 12 Б min-кадра = 16; cap 4 - стек-бюджет 4×130 Б, баланс бэклога) | §5.2 drain(FrameOut[4]) |
 | HandshakeReject/HelloAck | в приоритете 1 TX | #49 §10 |
+
+- **Трактовка бюджета #48 §7**: «<= 230 Б/тик RX+TX» читается как per-direction baud-derived (230 Б/10 мс физического потока в каждом направлении: UART-приём и передача физически независимы, полудуплексной шины нет). Каждый drain-бюджет порознь <= 230 Б/вызов; суммарный «combined <= 230 на любом 10-мс окне» инвариант не вводится и не проверяется. Средние потоки: RX ~21.3 КБ/с при каденции ~9 мс, TX ~19.2 КБ/с при каденции 10 мс; абсолютный worst-case окна 10 мс - до двух вызовов rx_tick (384 Б RX) + один sink_tick (192 Б TX), что не превышает физической пропускной способности линий (230 Б/10 мс на направление).
 
 - **Update-throughput**: RX 192 Б/вызов при каденции ~9 мс даёт среднюю ~21.3 КБ/с gross ingress - покрывает #48 §7 «update >= 12.8 КБ/с net (>= 1 MTU/тик)» с учёством ACK-корреляции; L4-сценарий transport-flood обязан замерить фактический throughput и занести в §11-триггеры.
 - **PerClassCapBytes 128 >= min(192, MTU)**: класс-кап #72 не блокирует кадр (128 >= любой кадр), конфликтов с DEFER нет.
@@ -293,8 +300,8 @@ struct UartRxSource
 
 | Инвариант | Источник | Проверка |
 | --- | --- | --- |
-| Mutating до handshake запрещён | #47 §5.1 | T3, T5 |
-| Handle на каждом principal-scoped кадре (FlagPrincipalHandle + payload-преамбула) | #47 §5.1 п.2 | T6, T16 |
+| Mutating до handshake запрещён; read-only Query доступен pre-handshake | #47 §5.1, #74 §3.2 | T3, T5, T5a |
+| Handle на каждом mutating principal-scoped кадре (FlagPrincipalHandle + payload-преамбула); read-only Control (Query) исключён | #47 §5.1 п.2, #74 §3.2 | T6, T16, T5a |
 | principal resolved из ingress+handle, payload authority_id - echo | #47 §5.1 п.6 | T6 |
 | handle не переназначается в epoch; re-hello -> тот же authority | #47 §5.1 п.5 | T7, T17 |
 | epoch change очищает map | #47 §5.1 п.5 | T8 |
@@ -370,7 +377,7 @@ class Handshake
 - `domain/observability.h`: `LinkBudgetBytes 230 -> 192` (§3.4; TX-бюджет Sink).
 - `domain/semantic.h/.cpp`: перегрузка `process_frame(const DecodedFrame&, const Grant&)` (решение §0.3).
 - `domain/queues.h`: `queue::Frame` + поле `authority_id` (u16, resolved при push; §4.2).
-- `platform/admission_glue.h/.cpp`: SemanticContext + указатель PrincipalRegistry; inbound_tick строит Grant из `frame.authority_id` (через registry-lookup roles) и вызывает process_frame(frame, grant) (review-файндинги M4/M5: «без изменений» было неверным).
+- `platform/admission_glue.h/.cpp`: SemanticContext + указатель PrincipalRegistry; inbound_tick строит Grant из `frame.authority_id` (через registry-lookup roles) и вызывает process_frame(frame, grant) (review-файндинги ревью-1 M4/M5: «без изменений» было неверным).
 - `adapters/uart_bridge.h/.cpp`: init включает RX (USART_CR1_RE + RXNEIE); ISR-диспетч обрабатывает TXE и RXNE; RX-кольцо 256 Б + rx_read + счётчики isr_drops/ore_events + volatile last_rx_ms.
 - `platform/transport_glue.h/.cpp`: новые self-repeating шаги rx_tick/link_tick.
 - `platform/main.cpp`: wiring transport-глUEя (schedule rx_tick/link_tick) + registry в SemanticContext.
@@ -398,7 +405,7 @@ kernel::process_tick
   -> transport_glue::link_tick (gap-таймер: partial && now-last_rx_ms > 250 -> gap_timeout)
 ```
 
-- Drain Service/Update классов - **#76/#77**; до них очереди заполняются и отклоняют с counters (by-design interim, наблюдаемо; review-файндинг N7).
+- Drain Service/Update классов - **#76/#77**; до них очереди заполняются и отклоняют с counters (by-design interim, наблюдаемо; review-файндинг ревью-1 N7).
 
 ### 7.2 Test call graph
 
@@ -412,7 +419,8 @@ host: fakes (FakeUartRx, RecordingOutbound, FakeEpoch) -> assembler/handshake/re
 | T2 | test_transport | Байты из прототипа = байты из codec #74 (нет диалекта) | byte-equal | host |
 | T3 | test_transport | Результат Hello полным маршрутом: HelloAck с authorityId/epoch/grant | полный конвейер | host |
 | T4 | test_transport | protoMajor != 1 -&gt; UnsupportedVersion | инъекция | host |
-| T5 | test_transport | Контроль-кадр pre-handshake (без handle-флага) -&gt; HandshakeRequired | маршрутизация | host |
+| T5 | test_transport | Mutating контроль-кадр pre-handshake (без handle-флага) -&gt; HandshakeRequired | маршрутизация | host |
+| T5a | test_transport | Read-only Control (Query) pre-handshake без флага -&gt; в очередь, НЕ HandshakeRequired (#74 §3.2) | маршрутизация | host |
 | T6 | test_transport | spoof: handle-преамбула != hello handle -&gt; Unauthorized | инъекция | host |
 | T7 | test_transport | re-hello -&gt; тот же authority_id (в epoch) | FSM | host |
 | T8 | test_transport | epoch change -&gt; map очищена, re-hello выделяет заново | FSM | host |
@@ -424,7 +432,7 @@ host: fakes (FakeUartRx, RecordingOutbound, FakeEpoch) -> assembler/handshake/re
 | T13 | test_transport | reserve-слоты: stop при полном Control-буфере проходит | queue full | host |
 | T14 | test_transport | partial + 250 мс gap -&gt; truncated_flush | таймер | host |
 | T15 | test_transport_integration | E2E: RX-байты -&gt; assembler -&gt; queue -&gt; semantic -&gt; ACK (полный конвейер с grant) | конвейер | host |
-| T16 | test_transport | Principal-scoped кадр без FlagPrincipalHandle -&gt; reject (§2.1b) | инъекция | host |
+| T16 | test_transport | Mutating Principal-scoped кадр без FlagPrincipalHandle -&gt; reject (§2.1b); Query без флага проходит | инъекция | host |
 | T17 | test_transport | re-hello с ДРУГИМ requestedRoles -&gt; grant refresh, тот же authority | FSM | host |
 | T18 | test_transport | Non-Hello Handshake-кадр -&gt; InvalidEnvelope, НЕ в очередях (reserve не занят) | маршрутизация | host |
 | T19 | test_transport | Короткий Hello (&lt; 5 Б) -&gt; InvalidEnvelope | инъекция | host |
@@ -435,7 +443,7 @@ host: fakes (FakeUartRx, RecordingOutbound, FakeEpoch) -> assembler/handshake/re
 
 - `transport-handshake`: flash firmware -> COM-порт: host-пир шлёт Hello -> ждёт HelloAck (validate authority/epoch) -> шлёт OperationRequest (valid epoch/authority) -> ждёт ACK-negative UnknownOperationType (реестр пуст) -> смена профиля на радио-expected -> ProfileMismatch. Verdict: minFrames, requirePatterns.
 - `transport-flood`: пир льёт мусор + валидные кадры -> контроллер отвечает только на валидные (Crc-bad ratio + счётчики).
-- Сценарии имеют формат scenario-v2 (capture + oracle) - расширяется `stimulus`-секцией (addiv: host-пир-скрипт в runner-цикле). Runner-расширение входит в PR #75 (инструментальный, не production).
+- Сценарии имеют формат scenario-v2 (capture + oracle) - расширяется `stimulus`-секцией (host-пир-скрипт в runner-цикле). Runner-расширение входит в PR #75 (инструментальный, не production): (a) ветка валидатора v2 без обязательного readback (capture-only v2-сценарий со stimulus - сейчас validate_scenario требует readback при schemaVersion 2); (b) ключ `stimulus` в JSON-схеме scenario-v2 (верхний уровень `additionalProperties: false` - требуется аддитивная ревизия схемы) - список шагов {delayMs, bytes | script} для записи в COM-порт до/во время capture; (c) stimulus-исполнение в run_loop между flash и capture-окном с перекрытием capture.durationS; (d) oracle-оценка после stimulus + capture (существующий evaluate_oracle). Existing v2-сценарии readback не затрагиваются.
 
 ## 8. Vertical slice граница
 
@@ -449,15 +457,15 @@ host: fakes (FakeUartRx, RecordingOutbound, FakeEpoch) -> assembler/handshake/re
 
 | Obligation | Закрытие |
 | --- | --- |
-| #47 §5.1 п.2 handle на каждом principal-scoped кадре | §2.1b, T6/T16 |
+| #47 §5.1 п.2 handle на каждом mutating principal-scoped кадре | §2.1b, T6/T16 |
 | #47 §5.1 handshake до mutating; no-reassign; BusyRejected | §3.2, T3-T9 |
-| #47 §5.1 п.7(e) principal-scoped без handle -> reject | §3.1, T16 |
+| #47 §5.1 п.7(e) mutating principal-scoped без handle -> reject; Query исключён (#74 §3.2) | §3.1, T16/T5a |
 | #47 §18 #2 handshake после reboot (epoch refresh) | T8 |
 | #47 §18 #12 authority binding (echo не resolver) | §3.2, T6 |
 | #47 §18 #10 multi-principal ledgers | T9/T9a (per-authority grants; ledger #74 уже per-authority) |
 | #47 §18 #14(a),(b) два handle -> два authority; re-hello -> тот же | T9a, T7 |
 | #47 §4.3 frameSeq dual-plane: pass-through (решение) | §4.3, T2 |
-| #48 §7 UART budget RX+TX (230 Б/тик, update >= 12.8 КБ/с) | §3.4, T10-T11 |
+| #48 §7 UART budget (per-direction трактовка, update >= 12.8 КБ/с) | §3.4, T10-T11 |
 | #48 §6 authority 16 | T9 |
 | #43 §6 never-block, reserve-слоты, drop+counter+event | §2.4/§3.1а, T11-T13 |
 | #43 §3.2 R2 ISR-граница | §1/§2.4, review |
