@@ -72,8 +72,8 @@ ROLE_SERVICE_CLIENT = 0x02
 
 # Budget model (#48 section 7: 230 B/tick RX+TX total; #49 section 10:
 # per-class TX caps 128 B, priority drain).
-RX_BUDGET_PER_TICK = 115  # D2 candidate: half of 230
-TX_BUDGET_PER_TICK = 115
+RX_BUDGET_PER_TICK = 192  # design #75 section 0.1: RX 192 / TX 192 split (>= MTU)
+TX_BUDGET_PER_TICK = 192  # combined <= 230 B on any 10 ms window (design section 3.4)
 INTER_FRAME_GAP_MS = 250  # V1 parser reset value (research C02)
 
 MAX_PRINCIPALS = 16  # authorityId budget (#48 section 6)
