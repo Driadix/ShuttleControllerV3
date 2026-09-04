@@ -258,7 +258,7 @@ link_tick(ctx):
 | Assembler.parse за вызов | <= 4 кадров (192 Б / 12 Б min-кадра = 16; cap 4 - стек-бюджет 4×130 Б, баланс бэклога) | §5.2 drain(FrameOut[4]) |
 | HandshakeReject/HelloAck | в приоритете 1 TX | #49 §10 |
 
-- **Трактовка бюджета #48 §7**: «<= 230 Б/тик RX+TX» читается как per-direction baud-derived (230 Б/10 мс физического потока в каждом направлении: UART-приём и передача физически независимы, полудуплексной шины нет). Каждый drain-бюджет порознь <= 230 Б/вызов; суммарный «combined <= 230 на любом 10-мс окне» инвариант не вводится и не проверяется. Средние потоки: RX ~21.3 КБ/с при каденции ~9 мс, TX ~19.2 КБ/с при каденции 10 мс; абсолютный worst-case окна 10 мс - до двух вызовов rx_tick (384 Б RX) + один sink_tick (192 Б TX), что не превышает физической пропускной способности линий (230 Б/10 мс на направление).
+- **Трактовка бюджета #48 §7**: «<= 230 Б/тик RX+TX» читается как per-direction baud-derived: UART-приём и передача физически независимы (полудуплексной шины нет), физический поток в каждом направлении ограничен линией 230400 8E1 = 230.4 Б/10 мс. Каждый drain-бюджет порознь <= 230 Б/вызов; суммарный «combined <= 230 на любом 10-мс окне» инвариант не вводится и не проверяется. Программный worst-case окна 10 мс - до двух вызовов rx_tick (потолок drain 2×192 = 384 Б) + один sink_tick (192 Б TX); фактический RX за окно не может превысить физический приток линии (230.4 Б/10 мс) - программный потолок выше линии, избыток не с чем выбирать (кольцо пустеет, rx_tick завершается досрочно). Средние: RX ~21.3 КБ/с при каденции ~9 мс, TX ~19.2 КБ/с при каденции 10 мс.
 
 - **Update-throughput**: RX 192 Б/вызов при каденции ~9 мс даёт среднюю ~21.3 КБ/с gross ingress - покрывает #48 §7 «update >= 12.8 КБ/с net (>= 1 MTU/тик)» с учёством ACK-корреляции; L4-сценарий transport-flood обязан замерить фактический throughput и занести в §11-триггеры.
 - **PerClassCapBytes 128 >= min(192, MTU)**: класс-кап #72 не блокирует кадр (128 >= любой кадр), конфликтов с DEFER нет.
@@ -438,6 +438,7 @@ host: fakes (FakeUartRx, RecordingOutbound, FakeEpoch) -> assembler/handshake/re
 | T19 | test_transport | Короткий Hello (&lt; 5 Б) -&gt; InvalidEnvelope | инъекция | host |
 | T20 | test_transport | expectedProfileId = radio -&gt; ProfileMismatch | инъекция | host |
 | T21 | test_transport | Unknown family/msgType кадр -&gt; transport_error, не в очередях | codec::decode | host |
+| T22 | test_transport | Assembler-дропы (bad_crc, truncated_flush) экспортируются в RuntimeEvents как transport_error (§3.1а: инъекция плохого кадра -> событие + счётчик дельты) | инъекция | host |
 
 ### 7.4 L4-сценарии (runner #65, тикет #75 acceptance)
 
@@ -447,7 +448,7 @@ host: fakes (FakeUartRx, RecordingOutbound, FakeEpoch) -> assembler/handshake/re
 
 ## 8. Vertical slice граница
 
-Один vertical PR: domain/transport (assembler + handshake + registry) + codec FlagPrincipalHandle + queues.h authority_id + ports UartRxSource + adapters/uart_bridge RX + platform/transport_glue + admission_glue grant-путь + observability.h LinkBudgetBytes + main.cpp wiring + host-тесты T1-T21 + runner scenario `transport-handshake` + bench/transport-proto (уже закоммичен).
+Один vertical PR: domain/transport (assembler + handshake + registry) + codec FlagPrincipalHandle + queues.h authority_id + ports UartRxSource + adapters/uart_bridge RX + platform/transport_glue + admission_glue grant-путь + observability.h LinkBudgetBytes + main.cpp wiring + host-тесты T1-T22 + runner scenario `transport-handshake` + bench/transport-proto (уже закоммичен).
 
 Наблюдаемый контракт: host contract/integration тесты + L4 UART runner (handshake, request, flood, gap). Gate: #69 (observability/communication) получает network_bridge-канал end-to-end.
 
